@@ -156,6 +156,11 @@ struct ProviderSnapshot: Identifiable, Equatable {
     private var authPrompt: String {
         switch id {
         case "claude":     return "Sign in to Claude Code to read your usage"
+        // A profile is signed in by running Claude Code against its directory,
+        // which is worth saying: plain `claude` signs the default one in.
+        case _ where ClaudeProfile.isClaude(providerID: id):
+            let slug = ClaudeProfile.slug(fromProviderID: id) ?? ""
+            return "Sign in to Claude Code in ~/.claude-\(slug) to read your usage"
         case "cursor":     return "Sign in to Cursor in the editor"
         case "codex":      return "Sign in to Codex to read your usage"
         case "gemini":     return "Sign in to Antigravity to read your usage"

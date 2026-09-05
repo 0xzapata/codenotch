@@ -909,6 +909,7 @@ final class KeychainProviderTests: XCTestCase {
 
     func testOnlyKeychainBackedProvidersOfferIt() {
         XCTAssertTrue(summary("claude").usesKeychain)
+        XCTAssertTrue(summary("claude-work").usesKeychain, "every profile's token is a keychain item")
         XCTAssertTrue(summary("gemini").usesKeychain)
         XCTAssertFalse(summary("cursor").usesKeychain, "Cursor reads a file, not the keychain")
         XCTAssertFalse(summary("codex").usesKeychain, "Codex reads a file, not the keychain")

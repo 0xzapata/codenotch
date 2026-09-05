@@ -15,29 +15,20 @@ struct ClaudeCredentials {
 
     var isExpired: Bool { expiresAt <= Date() }
 
-    static let service = "Claude Code-credentials"
+    /// The service the default profile's token is filed under. Other profiles
+    /// get a suffix — see `ClaudeProfile.keychainService`.
+    static let service = ClaudeProfile.defaultKeychainService
 
-    /// Read once, then held until the token expires — see `CredentialCache`.
-    /// Claude Code rotates this roughly hourly, so this is about one keychain
-    /// read an hour instead of two a minute.
-    private static let cache = CredentialCache<ClaudeCredentials> { $0.isExpired }
+    /// Reads the default profile. Kept for callers that predate profiles.
+    static func load() throws -> ClaudeCredentials { try ClaudeKeychain.default.load() }
+    static func forgetCached() { ClaudeKeychain.default.forgetCached() }
 
-    /// Forget the held copy. Call when the server rejects it: signing into a
-    /// different account replaces the keychain item, and the copy in hand is
-    /// then wrong despite not having expired.
-    static func forgetCached() { cache.forget() }
-
-    /// Reads whatever is stored, expired or not. Judging expiry is the caller's
-    /// job, because "signed out" and "the token has aged out overnight" call for
-    /// different behaviour and only one of them is worth alarming anyone about.
-    static func load() throws -> ClaudeCredentials {
-        try cache.value(
-            itemModifiedAt: { KeychainItem.modifiedAt(service: service) },
-            reload: read
-        )
-    }
-
-    private static func read() throws -> ClaudeCredentials {
+    /// The keychain read itself, for one service name.
+    ///
+    /// `ClaudeKeychain` decides *whether* to read; this is what happens when it
+    /// does. Every failure is turned into the status the UI should show, and
+    /// the raw OSStatus is logged so "not found" and "refused" stay distinct.
+    static func read(service: String) throws -> ClaudeCredentials {
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass: kSecClassGenericPassword,
@@ -51,7 +42,7 @@ struct ClaudeCredentials {
             // in, whereas -25308 (interaction not allowed) or -128 (user
             // cancelled) mean the item is there but this app is not on its
             // access list. Those need very different advice, so record which.
-            Log.usage.error("keychain read failed: OSStatus \(status) (\(Self.explain(status), privacy: .public))")
+            Log.usage.error("keychain read of \(service, privacy: .public) failed: OSStatus \(status) (\(Self.explain(status), privacy: .public))")
             throw Self.wasRefused(status)
                 ? UsageProviderError.accessDenied
                 : UsageProviderError.needsAuth
@@ -104,4 +95,45 @@ struct ClaudeCredentials {
             return (SecCopyErrorMessageString(status, nil) as String?) ?? "unknown"
         }
     }
+}
+
+/// One profile's token, read as rarely as the keychain allows.
+///
+/// One of these per `ClaudeProfile`, because each profile's token is a separate
+/// keychain item with its own access list: macOS prompts once per item, and a
+/// cache shared between them would hand the personal token to the work ring.
+final class ClaudeKeychain: @unchecked Sendable {
+    let service: String
+
+    /// Read once, then held until the token expires — see `CredentialCache`.
+    /// Claude Code rotates this roughly hourly, so this is about one keychain
+    /// read an hour instead of two a minute.
+    private let cache = CredentialCache<ClaudeCredentials> { $0.isExpired }
+
+    init(service: String) {
+        self.service = service
+    }
+
+    convenience init(profile: ClaudeProfile) {
+        self.init(service: profile.keychainService)
+    }
+
+    /// The default profile's reader, shared so that every caller that predates
+    /// profiles keeps sharing one cache — and so one prompt.
+    static let `default` = ClaudeKeychain(service: ClaudeProfile.defaultKeychainService)
+
+    /// Reads whatever is stored, expired or not. Judging expiry is the caller's
+    /// job, because "signed out" and "the token has aged out overnight" call for
+    /// different behaviour and only one of them is worth alarming anyone about.
+    func load() throws -> ClaudeCredentials {
+        try cache.value(
+            itemModifiedAt: { KeychainItem.modifiedAt(service: service) },
+            reload: { try ClaudeCredentials.read(service: service) }
+        )
+    }
+
+    /// Forget the held copy. Call when the server rejects it: signing into a
+    /// different account replaces the keychain item, and the copy in hand is
+    /// then wrong despite not having expired.
+    func forgetCached() { cache.forget() }
 }

@@ -883,7 +883,7 @@ final class StatusMessageHeightTests: XCTestCase {
             ("stale", .stale(since: .distantPast)),
             ("ok", .ok)
         ]
-        return [("claude", "Claude"), ("cursor", "Cursor"),
+        return [("claude", "Claude"), ("claude-work", "Claude (work)"), ("cursor", "Cursor"),
                 ("codex", "Codex"), ("gemini", "Antigravity")].flatMap { id, name in
             states.map { state in
                 ("\(id)/\(state.0)",
