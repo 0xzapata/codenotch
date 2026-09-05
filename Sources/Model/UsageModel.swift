@@ -90,9 +90,7 @@ struct UsageBlock: Equatable {
     /// The line the tooltip leads with.
     func summary(now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let resetsAt, resetsAt > now else { return reason }
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = .current
+        let formatter = ResetCopy.formatter(for: calendar)
         // The same clock the vendor's own banner uses — "4:13 PM" — rather
         // than a countdown, because that is what you are waiting for.
         formatter.dateFormat = ResetCopy.daysApart(from: now, to: resetsAt,
