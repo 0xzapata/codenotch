@@ -52,6 +52,9 @@ running, and what it wants.
 Cursor and Codex are wired up too, both reading locally: Cursor borrows the
 editor's own session from its SQLite state store, and Codex reads the rate-limit
 snapshots it writes into its own rollout logs — no credential, no network.
+GLM reads the Z.ai Coding Plan's own monitor endpoint with a key borrowed from
+whichever coding tool holds one — Claude Code's `settings.json`, ZCode or
+OpenCode — and shows the plan's 5-hour, weekly and MCP allowances.
 Perplexity's adapter is kept but unregistered.
 Run with `CODENOTCH_DEMO=1` to see the design frame's three-provider layout with
 its numbers. See **[TASKS.md](TASKS.md)**.

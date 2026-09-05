@@ -62,7 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // switched-off ones once the binding below delivered.
             let store = UsageStore(
                 providers: [ClaudeOAuthProvider(), CursorLocalProvider(),
-                            CodexLocalProvider(), AntigravityProvider()]
+                            CodexLocalProvider(), AntigravityProvider(),
+                            GLMProvider()]
                     + webProviders,
                 disconnected: preferences.disconnectedProviders
             )
