@@ -112,7 +112,7 @@ struct ProviderSummary: Identifiable, Equatable {
     /// refused. Cursor and Codex read ordinary files and never prompt, so
     /// offering them an "allow access" button would be offering a cure for an
     /// illness they cannot catch.
-    var usesKeychain: Bool { id == "claude" || id == "gemini" }
+    var usesKeychain: Bool { ClaudeProfile.isClaude(providerID: id) || id == "gemini" }
 
     let id: String
     let name: String

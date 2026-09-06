@@ -2,8 +2,9 @@ import AppKit
 import Combine
 import Foundation
 
-/// Watches `~/.claude/sessions` and publishes the Claude Code sessions that are
-/// actually running.
+/// Watches one profile's `sessions` directory — `~/.claude/sessions` by
+/// default — and publishes the Claude Code sessions that are actually running.
+/// One monitor per `ClaudeProfile`; see `AppDelegate`.
 ///
 /// The directory is watched rather than polled, because Claude Code writes a
 /// session file the moment its state changes — so "Claude just finished" shows

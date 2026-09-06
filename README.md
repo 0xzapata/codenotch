@@ -30,6 +30,13 @@ provider's ring while a session is busy, and becomes a pulsing amber ring when
 one is blocked waiting on you. Hover for every live session by name, where it
 is running, and what it wants.
 
+Two Claude Code logins are two rings. Anyone who keeps a work account apart with
+`CLAUDE_CONFIG_DIR=~/.claude-work claude` gets a **Claude (work)** ring beside the
+personal one, with its own limits, its own sessions and its own row in Settings.
+Any `~/.claude-<slug>` directory Claude Code has run against is found at launch;
+the default `~/.claude` always comes first, the rest in alphabetical order, so the
+rings never swap places.
+
 ## Placement
 
 The notch lives on any of the four screen edges. Right and left keep a
