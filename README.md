@@ -18,6 +18,7 @@ two never disagree.
 | **Cursor** | official | The editor's own signed-in session, read from its local SQLite state — no separate sign-in. |
 | **Codex** | official | Codex's own app server, asked live for the current rate limits. Falls back to its rollout log when Codex isn't running. |
 | **Antigravity** | official where licensed, otherwise a request count | Antigravity's local language server first, then Google's quota endpoint; a plain count when neither will answer for the account. |
+| **GLM** | official | Z.ai's Coding Plan monitor endpoint, with a key borrowed from whichever coding tool already holds one — Claude Code's `settings.json`, ZCode, or OpenCode. |
 
 Codenotch never signs in anywhere. Every reading is borrowed from a credential
 or session a tool on your Mac already holds — install and sign in to any of
