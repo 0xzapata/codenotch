@@ -31,6 +31,25 @@ struct ReleaseNote: Equatable {
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "1.5.0",
+            headline: "Grok on the notch, and when the plan actually renews.",
+            changes: [
+                ReleaseNote.Change(
+                    title: "Grok is a fifth ring",
+                    detail: "SuperGrok's weekly Grok Build allowance is read "
+                          + "from the same billing endpoint the CLI uses, with "
+                          + "the session in ~/.grok/auth.json. The mark is "
+                          + "grok.com's own swirl."
+                ),
+                ReleaseNote.Change(
+                    title: "The tooltip says when the plan renews",
+                    detail: "Grok on the 18th, Claude on the 17th, Codex on "
+                          + "the 7th — the charge day, not a usage-window "
+                          + "reset. Hover the ring or open Settings."
+                )
+            ]
+        ),
+        ReleaseNote(
             version: "1.4.0",
             headline: "Two more accounts, four community fixes, and honest duplicates.",
             changes: [

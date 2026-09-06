@@ -102,6 +102,41 @@ final class ResetCopyDistantDateTests: XCTestCase {
                                 to: date("2026-09-02T00:30:00+07:00"),
                                 calendar: calendar), 1)
     }
+
+    /// A subscription that renews in three days is still "Oct 1", not
+    /// "Thu 12:00 AM". A weekday next to a bill is the wrong fact.
+    func testARenewalAlwaysShowsTheDate() {
+        let text = ResetCopy.text(for: date("2026-10-01T15:00:00+07:00"),
+                                  now: date("2026-09-28T12:00:00+07:00"),
+                                  calendar: calendar,
+                                  rollover: .renews)
+        XCTAssertTrue(text.hasPrefix("Renews "), "expected Renews, got \(text)")
+        XCTAssertTrue(text.contains("1"), "the calendar day is missing: \(text)")
+        XCTAssertTrue(text.contains("Oct"), "the month is missing: \(text)")
+        XCTAssertFalse(text.contains("Thu"), "a weekday leaked onto a renewal")
+        XCTAssertFalse(text.contains("AM") || text.contains("PM"),
+                       "a time leaked onto a renewal")
+    }
+
+    func testAPastRenewalReadsAsRenewing() {
+        XCTAssertEqual(
+            ResetCopy.text(for: date("2026-09-01T00:00:00+07:00"),
+                           now: date("2026-09-02T00:00:00+07:00"),
+                           calendar: calendar,
+                           rollover: .renews),
+            "Renewing…")
+    }
+
+    /// On the charge day the copy still names that day, even after noon.
+    func testTheChargeDayStillReadsAsThatDateInTheEvening() {
+        let text = ResetCopy.text(for: date("2026-09-18T12:00:00+07:00"),
+                                  now: date("2026-09-18T21:00:00+07:00"),
+                                  calendar: calendar,
+                                  rollover: .renews)
+        XCTAssertTrue(text.hasPrefix("Renews "), text)
+        XCTAssertTrue(text.contains("18"), text)
+        XCTAssertFalse(text.contains("Renewing"), text)
+    }
 }
 
 /// Vendors disagree on which end of the figure to show — Codex writes "87%
@@ -137,5 +172,13 @@ final class WindowSummaryTests: XCTestCase {
     func testCountsAreUntouched() {
         XCTAssertEqual(LimitWindow(id: "w", label: "Requests", used: 8).summary, "8 used")
         XCTAssertEqual(LimitWindow(id: "w", label: "Requests", remaining: 3).summary, "3 left")
+    }
+
+    /// A subscription row is the date on the trailing copy. "No reading" under
+    /// "Renews Oct 1" would look like the date was a guess.
+    func testARenewalRowHasNoFakeReading() {
+        XCTAssertEqual(
+            LimitWindow(id: "s", label: "Subscription",
+                        resetsAt: Date(), rollover: .renews).summary, "")
     }
 }

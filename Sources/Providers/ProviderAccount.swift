@@ -129,4 +129,8 @@ struct ProviderSummary: Identifiable, Equatable {
     /// cure for an illness the provider does not have, and a button that does
     /// nothing is indistinguishable from a broken one.
     var wasRefusedAccess: Bool = false
+    /// When the plan itself renews, already formatted ("Renews Sep 18").
+    /// Taken from the latest snapshot, not the credential — the date lives
+    /// on the billing response, not in the login file.
+    var renewal: String? = nil
 }

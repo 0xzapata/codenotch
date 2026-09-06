@@ -2,11 +2,21 @@ import AppKit
 import Combine
 import os
 
+extension Notification.Name {
+    /// Settings listens so a renewal date that arrives after the sheet opened
+    /// still appears, without waiting for the window to be re-keyed.
+    static let usageSnapshotsDidChange = Notification.Name("CodenotchUsageSnapshotsDidChange")
+}
+
 /// Fetches every provider on a timer and keeps the last good answer around, so
 /// a dropped network shows yesterday's number dimmed rather than a blank ring.
 @MainActor
 final class UsageStore: ObservableObject {
-    @Published private(set) var snapshots: [ProviderSnapshot] = []
+    @Published private(set) var snapshots: [ProviderSnapshot] = [] {
+        didSet {
+            NotificationCenter.default.post(name: .usageSnapshotsDidChange, object: nil)
+        }
+    }
     /// Providers with a fetch in flight, so the cell can show it happening.
     @Published private(set) var refreshing: Set<String> = []
     /// Providers whose last fetch was refused by macOS, cleared as soon as one
@@ -107,10 +117,12 @@ final class UsageStore: ObservableObject {
     /// Enough to list the providers in settings without exposing them.
     var providerSummaries: [ProviderSummary] {
         providers.map { provider in
-            ProviderSummary(id: provider.id, name: provider.displayName,
-                            glyph: provider.glyph, account: provider.account(),
-                            signIn: provider.signInRoute,
-                            wasRefusedAccess: refusedAccess.contains(provider.id))
+            let renewal = snapshots.first { $0.id == provider.id }?.renewalCopy()
+            return ProviderSummary(id: provider.id, name: provider.displayName,
+                                   glyph: provider.glyph, account: provider.account(),
+                                   signIn: provider.signInRoute,
+                                   wasRefusedAccess: refusedAccess.contains(provider.id),
+                                   renewal: renewal)
         }
     }
 
@@ -300,6 +312,7 @@ final class UsageStore: ObservableObject {
     private func snapshot(from provider: UsageProvider) async -> ProviderSnapshot {
         do {
             let fresh = try await provider.fetchSnapshot()
+                .preservingPriorRenewal(from: lastGood[provider.id]?.snapshot)
             lastGood[provider.id] = (fresh, Date())
             archive.save(lastGood)
             refusedAccess.remove(provider.id)

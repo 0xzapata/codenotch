@@ -40,7 +40,9 @@ final class ClaudeOAuthProviderTests: XCTestCase {
         XCTAssertEqual(StubEndpoint.requestCount, 3,
                        "the next tick never reached the endpoint")
         XCTAssertEqual(snapshot.status, .ok)
-        XCTAssertEqual(snapshot.windows.first?.id, "session")
+        XCTAssertEqual(snapshot.headlineID, "session")
+        XCTAssertEqual(snapshot.headline?.id, "session")
+        XCTAssertEqual(snapshot.renewal?.id, "subscription")
     }
 
     /// A keychain read that failed must not stop the next tick from reading again.

@@ -136,7 +136,8 @@ actor ClaudeOAuthProvider: UsageProvider {
             glyph: glyph,
             fidelity: .official,
             status: .ok,
-            windows: payload.limitWindows(),
+            windows: BillingAnniversary.prepending(day: BillingAnniversary.claudeDay,
+                                                   to: payload.limitWindows()),
             headlineID: "session"
         )
     }

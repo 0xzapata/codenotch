@@ -191,6 +191,50 @@ final class UsageArchiveTests: XCTestCase {
     func testEmptyArchiveIsNotAnError() {
         XCTAssertTrue(UsageArchive(defaults: makeDefaults()).load().isEmpty)
     }
+
+    /// Grok's monthly date is stored first in `windows`, but the ring is the
+    /// credits window. Without `headlineID` a cold start would promote the
+    /// renewal row and the cell would show a dash until a fetch landed.
+    func testANamedHeadlineSurvivesRelaunch() throws {
+        let defaults = makeDefaults()
+        let reading = ProviderSnapshot(
+            id: "grok", displayName: "Grok", glyph: .grok,
+            fidelity: .official, status: .ok,
+            windows: [
+                LimitWindow(id: "subscription", label: "Monthly renewal",
+                            resetsAt: Date(timeIntervalSince1970: 1_788_000_000),
+                            rollover: .renews),
+                LimitWindow(id: "credits", label: "Grok Build",
+                            usedFraction: 0.26)
+            ],
+            headlineID: "credits"
+        )
+        UsageArchive(defaults: defaults).save(["grok": (reading, Date())])
+        let restored = try XCTUnwrap(UsageArchive(defaults: defaults).load()["grok"])
+        XCTAssertEqual(restored.snapshot.headlineID, "credits")
+        XCTAssertEqual(restored.snapshot.headline?.id, "credits")
+        XCTAssertEqual(restored.snapshot.usedFraction ?? -1, 0.26, accuracy: 0.0001)
+        XCTAssertEqual(restored.snapshot.renewal?.id, "subscription")
+    }
+
+    /// Archives written before `headlineID` existed omit the key. The ring
+    /// still has to be credits, not the bar-less subscription sitting first.
+    func testALegacyArchiveWithoutHeadlineIDStillRingsCredits() throws {
+        let defaults = makeDefaults()
+        let json = """
+        [{"id":"grok","displayName":"Grok","glyph":"grok","fidelity":"official",\
+        "windows":[\
+          {"id":"subscription","label":"Monthly renewal","resetsAt":812505600,"rollover":"renews"},\
+          {"id":"credits","label":"Grok Build","usedFraction":0.26}\
+        ],"fetchedAt":810335547.157}]
+        """
+        defaults.set(Data(json.utf8), forKey: "lastGoodReadings")
+        let restored = try XCTUnwrap(UsageArchive(defaults: defaults).load()["grok"])
+        XCTAssertNil(restored.snapshot.headlineID)
+        XCTAssertEqual(restored.snapshot.headline?.id, "credits")
+        XCTAssertEqual(restored.snapshot.usedFraction ?? -1, 0.26, accuracy: 0.0001)
+        XCTAssertEqual(restored.snapshot.renewal?.id, "subscription")
+    }
 }
 
 /// `Retry-After: 0` is the endpoint's actual answer, and obeying it literally is

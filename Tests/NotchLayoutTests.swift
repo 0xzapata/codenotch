@@ -271,6 +271,17 @@ final class TooltipResizeTests: XCTestCase {
     func testAWindowlessCardStillHasARealHeight() {
         XCTAssertGreaterThan(NotchLayout.cardHeight(windowCount: 0), NotchLayout.cardPadding * 2)
     }
+
+    /// The bill date is one line of copy. Costing it as a bar + percentage
+    /// row made the last-cell Grok tooltip overshoot while the date itself
+    /// still read as a quiet label next to weekly credits.
+    func testARenewalLineIsNotChargedAsAUsageWindow() {
+        let usage = NotchLayout.cardHeight(windowCount: 1)
+        let withDate = NotchLayout.cardHeight(windowCount: 1, renewalLine: true)
+        let twoWindows = NotchLayout.cardHeight(windowCount: 2)
+        XCTAssertGreaterThan(withDate, usage)
+        XCTAssertLessThan(withDate, twoWindows)
+    }
 }
 
 /// The tooltip is one object: a card with a tail welded to its side. What breaks
@@ -572,7 +583,7 @@ final class ProviderGlyphTests: XCTestCase {
     }
 
     func testEveryGlyphResolvesAnOutline() {
-        for glyph in [ProviderGlyph.claude, .openai, .third, .cursor, .antigravity] {
+        for glyph in [ProviderGlyph.claude, .openai, .third, .cursor, .antigravity, .glm, .grok] {
             XCTAssertFalse(glyph.outline.isEmpty, "\(glyph) draws nothing")
         }
     }
