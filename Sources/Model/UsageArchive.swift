@@ -65,6 +65,12 @@ struct UsageArchive {
 
         var result: [String: (snapshot: ProviderSnapshot, fetchedAt: Date)] = [:]
         for entry in entries {
+            // Older Codex readings came from rollouts and may include quotas
+            // the live provider no longer displays. Wait for a fresh reading.
+            if entry.id == "codex",
+               entry.windows.contains(where: { $0.id != "session" && $0.id != "weekly" }) {
+                continue
+            }
             let snapshot = ProviderSnapshot(
                 id: entry.id,
                 displayName: entry.displayName,
