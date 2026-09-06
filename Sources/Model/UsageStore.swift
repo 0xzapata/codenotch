@@ -9,6 +9,9 @@ final class UsageStore: ObservableObject {
     @Published private(set) var snapshots: [ProviderSnapshot] = []
     /// Providers with a fetch in flight, so the cell can show it happening.
     @Published private(set) var refreshing: Set<String> = []
+    /// Providers whose last fetch was refused by macOS, cleared as soon as one
+    /// succeeds. The settings row's only honest basis for offering to ask again.
+    @Published private(set) var refusedAccess: Set<String> = []
 
     private let providers: [UsageProvider]
     /// Providers the user has switched off. They are not fetched at all — their
@@ -95,9 +98,11 @@ final class UsageStore: ObservableObject {
 
     /// Enough to list the providers in settings without exposing them.
     var providerSummaries: [ProviderSummary] {
-        providers.map {
-            ProviderSummary(id: $0.id, name: $0.displayName, glyph: $0.glyph,
-                            account: $0.account(), signIn: $0.signInRoute)
+        providers.map { provider in
+            ProviderSummary(id: provider.id, name: provider.displayName,
+                            glyph: provider.glyph, account: provider.account(),
+                            signIn: provider.signInRoute,
+                            wasRefusedAccess: refusedAccess.contains(provider.id))
         }
     }
 
@@ -289,6 +294,7 @@ final class UsageStore: ObservableObject {
             let fresh = try await provider.fetchSnapshot()
             lastGood[provider.id] = (fresh, Date())
             archive.save(lastGood)
+            refusedAccess.remove(provider.id)
             Log.usage.debug("\(provider.id, privacy: .public): \(fresh.windows.count) window(s)")
             return fresh
         } catch {
@@ -301,6 +307,18 @@ final class UsageStore: ObservableObject {
     /// one marked stale, or shows the cell with no reading at all.
     private func degraded(provider: UsageProvider, error: Error) -> ProviderSnapshot {
         let status = Self.status(for: error)
+
+        // Remembered apart from the snapshot on purpose. The snapshot answers
+        // "how good are the numbers I am showing", and for a refusal the honest
+        // answer is "still fine, just ageing" — which is why `supersedesHistory`
+        // keeps the old reading and its status. That deliberately loses the one
+        // fact the settings row needs: whether macOS let us in last time. Two
+        // different questions, so two different places to keep the answer.
+        if case .accessDenied = status {
+            refusedAccess.insert(provider.id)
+        } else {
+            refusedAccess.remove(provider.id)
+        }
 
         // Some failures are statements about the account rather than a hiccup:
         // signed out, or a plan that meters nothing. Re-showing an old reading
