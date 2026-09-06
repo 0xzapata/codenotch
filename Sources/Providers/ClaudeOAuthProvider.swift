@@ -17,11 +17,6 @@ actor ClaudeOAuthProvider: UsageProvider {
     /// Held between refreshes so the keychain is read once per token, not once
     /// per minute — a keychain read can put a prompt in front of the user.
     private var credentials: ClaudeCredentials?
-    /// When the keychain last refused us. Reading the keychain can put a system
-    /// prompt in front of the user, so a refusal has to back off — otherwise
-    /// every refresh tick would raise the dialog again.
-    private var lastAuthFailure: Date?
-    private let authRetryDelay: TimeInterval = 5 * 60
     /// Set when the endpoint returns 429. Until it passes, refreshes are
     /// skipped without touching the network — a poll that keeps firing into a
     /// rate limit is how you stay rate limited.
@@ -31,10 +26,18 @@ actor ClaudeOAuthProvider: UsageProvider {
     private var consecutiveRateLimits = 0
 
     private let archive: UsageArchive
+    /// How the OAuth token is obtained. Injected for the same reason `session` is:
+    /// the token path had no tests, which is how a back-off that never expired
+    /// shipped. Production passes `ClaudeCredentials.load`.
+    private let loadCredentials: @Sendable () throws -> ClaudeCredentials
 
-    init(session: URLSession = .shared, archive: UsageArchive = UsageArchive()) {
+    init(session: URLSession = .shared,
+         archive: UsageArchive = UsageArchive(),
+         loadCredentials: @escaping @Sendable () throws -> ClaudeCredentials
+             = ClaudeCredentials.load) {
         self.session = session
         self.archive = archive
+        self.loadCredentials = loadCredentials
         // Pick the back-off back up where the last run left it, so relaunching
         // during a penalty does not spend an attempt extending it.
         self.retryNoEarlierThan = archive.loadBackoffUntil()
@@ -48,14 +51,19 @@ actor ClaudeOAuthProvider: UsageProvider {
         }
         do {
             let snapshot = try await fetch(retryingOnUnauthorized: true)
-            lastAuthFailure = nil
             retryNoEarlierThan = nil
             consecutiveRateLimits = 0
             archive.saveBackoffUntil(nil)
             return snapshot
         } catch UsageProviderError.needsAuth {
+            // The held copy goes, so the next tick re-reads. Backing off is
+            // `CredentialCache`'s job and it already does it correctly: it
+            // waits on the item's modification date rather than on a clock, so
+            // a token Claude Code has just rotated is picked up at once. A
+            // second timer here could only ever be wrong — and was: it stamped
+            // itself on every failed tick, so its own window never expired and
+            // the keychain was never read again.
             credentials = nil
-            lastAuthFailure = Date()
             throw UsageProviderError.needsAuth
         } catch UsageProviderError.credentialExpired {
             credentials = nil
@@ -124,10 +132,7 @@ actor ClaudeOAuthProvider: UsageProvider {
         if let credentials, !credentials.isExpired {
             return credentials.accessToken
         }
-        if let lastAuthFailure, Date().timeIntervalSince(lastAuthFailure) < authRetryDelay {
-            throw UsageProviderError.needsAuth
-        }
-        let fresh = try ClaudeCredentials.load()
+        let fresh = try loadCredentials()
         Log.usage.debug("read keychain token, expires \(fresh.expiresAt, privacy: .public)")
         // Expired is not signed out. Claude Code rotates this token whenever it
         // runs, and this app deliberately does not — minting one would mean
