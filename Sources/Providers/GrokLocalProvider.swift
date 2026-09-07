@@ -3,10 +3,9 @@ import os
 
 /// Reads Grok Build usage from the same billing endpoint the CLI's `/usage` uses.
 ///
-/// The credential is Grok's own `~/.grok/auth.json` session. Credits
-/// (`?format=credits`) is the ring. The charge date is the 18th of the
-/// month — unformatted `/billing` ends on the 1st, which is the usage
-/// ledger, not when the card is charged.
+/// The credential is Grok's own `~/.grok/auth.json` session — the CLI's job to
+/// refresh, not this app's. Credits (`?format=credits`) is the weekly Grok
+/// Build allowance, and the only number this endpoint actually states.
 actor GrokLocalProvider: UsageProvider {
     nonisolated let id = "grok"
     nonisolated let displayName = "Grok"

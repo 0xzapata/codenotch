@@ -1,26 +1,10 @@
 import Foundation
 
 /// "Resets in 51 min" under an hour, "Resets Thu 12:00 AM" within the week,
-/// "Resets Sep 28" beyond it. A subscription uses the date form always —
-/// "Renews Oct 1" — because a weekday next to a bill is the wrong fact.
+/// "Resets Sep 28" beyond it.
 enum ResetCopy {
-    static func text(for resetsAt: Date, now: Date = Date(), calendar: Calendar = .current,
-                     rollover: LimitWindow.Rollover = .resets) -> String {
+    static func text(for resetsAt: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let seconds = resetsAt.timeIntervalSince(now)
-        if rollover == .renews {
-            // The charge *day*, not the instant. On the 18th the bill is still
-            // "Renews Sep 18" at 9pm; comparing the raw timestamp would flip
-            // to "Renewing…" at noon.
-            guard calendar.startOfDay(for: resetsAt) >= calendar.startOfDay(for: now)
-            else { return "Renewing…" }
-            let formatter = DateFormatter()
-            formatter.calendar = calendar
-            formatter.timeZone = calendar.timeZone
-            formatter.locale = .current
-            formatter.setLocalizedDateFormatFromTemplate("MMM d")
-            return "Renews \(formatter.string(from: resetsAt))"
-        }
-
         guard seconds > 0 else { return "Resetting…" }
 
         // Rounding, not truncation, so 50m40s reads as 51 rather than 50. A

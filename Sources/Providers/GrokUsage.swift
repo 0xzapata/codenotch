@@ -14,12 +14,14 @@ import Foundation
 ///     "billingPeriodEnd":   "2026-09-12T08:21:18.802818+00:00" } }
 /// ```
 ///
-/// The unformatted `/billing` payload's `billingPeriodEnd` is the calendar
-/// month (the 1st). That is the usage ledger, not the charge date — this
-/// account renews on the 18th. The credits payload is the ring.
+/// The credits payload is the ring: a weekly Grok Build allowance. Grok's own
+/// account charge date is not in this response — the unformatted `/billing`
+/// payload's `billingPeriodEnd` is a calendar-month usage ledger, not a bill,
+/// and nothing here says which day of the month an account is actually
+/// charged. Showing one would mean guessing at a fact this endpoint does not
+/// state.
 enum GrokUsage {
-    static func windows(creditsJSON: String, now: Date = Date(),
-                        calendar: Calendar = .current) throws -> [LimitWindow] {
+    static func windows(creditsJSON: String) throws -> [LimitWindow] {
         guard let credits = object(creditsJSON)?["config"] as? [String: Any] else {
             throw UsageProviderError.badResponse(status: 0)
         }
@@ -52,18 +54,9 @@ enum GrokUsage {
             }
         }
 
-        // A renewal row must not be the thing that makes this a success. If
-        // credits produced nothing, the ring has no subject; attaching
-        // the charge date would hide that behind a dash and a date.
         guard !windows.isEmpty else {
             throw UsageProviderError.nothingMetered("Grok has nothing metered on this account yet")
         }
-
-        windows.insert(
-            BillingAnniversary.window(day: BillingAnniversary.grokDay,
-                                      now: now, calendar: calendar),
-            at: 0
-        )
         return windows
     }
 

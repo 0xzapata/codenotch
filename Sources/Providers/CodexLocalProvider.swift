@@ -32,9 +32,7 @@ actor CodexLocalProvider: UsageProvider {
         if let live = await liveReading(), !live.windows.isEmpty {
             return ProviderSnapshot(
                 id: id, displayName: displayName, glyph: glyph,
-                fidelity: .official, status: .ok,
-                windows: BillingAnniversary.prepending(day: BillingAnniversary.codexDay,
-                                                       to: live.windows),
+                fidelity: .official, status: .ok, windows: live.windows,
                 headlineID: "primary", block: live.block
             )
         }
@@ -51,8 +49,7 @@ actor CodexLocalProvider: UsageProvider {
             glyph: glyph,
             fidelity: .official,
             status: Self.status(recordedAt: CodexUsage.recordedAt(inRollout: text)),
-            windows: BillingAnniversary.prepending(day: BillingAnniversary.codexDay,
-                                                   to: windows),
+            windows: windows,
             headlineID: "primary"
         )
     }

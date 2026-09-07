@@ -274,8 +274,7 @@ enum NotchLayout {
     static func cardHeight(windowCount: Int, sessionCount: Int = 0,
                            sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
-                           blockMessage: String? = nil,
-                           renewalLine: Bool = false) -> CGFloat {
+                           blockMessage: String? = nil) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
         var height = 2 * cardPadding + header
 
@@ -285,20 +284,12 @@ enum NotchLayout {
             height += headerToBlock + bodyTextHeight(blockMessage)
         }
 
-        // One line of copy, not a usage window: "Renews Oct 1" is the bill,
-        // and charging it as a bar+percentage row overhung the last-cell
-        // tooltip while still looking like a quiet label the eye skipped.
-        if renewalLine {
-            height += headerToBlock + cardBodyLineHeight
-        }
-
         if windowCount > 0 {
             let block = 2 * cardBodyLineHeight + labelToBar + barHeight + barToUsed
-            let firstGap = renewalLine ? blockSpacing : headerToBlock
-            height += firstGap
+            height += headerToBlock
                 + CGFloat(windowCount) * block
                 + CGFloat(windowCount - 1) * blockSpacing
-        } else if !renewalLine {
+        } else {
             // The status message, at whatever height it actually wraps to.
             height += headerToBlock + bodyTextHeight(statusMessage ?? "")
         }
@@ -315,22 +306,6 @@ enum NotchLayout {
             }
         }
         return height
-    }
-
-    /// The same figure the hover region and the card chrome both use, so a
-    /// renewal line cannot make them disagree about how tall the tooltip is.
-    static func cardHeight(for snapshot: ProviderSnapshot,
-                           sessionCount: Int = 0,
-                           sessionCap: Int = defaultSessionCap,
-                           now: Date = Date()) -> CGFloat {
-        cardHeight(
-            windowCount: snapshot.usageWindows.count,
-            sessionCount: sessionCount,
-            sessionCap: sessionCap,
-            statusMessage: snapshot.statusMessage,
-            blockMessage: snapshot.block?.summary(now: now),
-            renewalLine: snapshot.renewalCopy(now: now) != nil
-        )
     }
 
 

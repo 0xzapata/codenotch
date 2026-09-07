@@ -242,9 +242,7 @@ private struct LimitWindowRow: View {
 
     /// Blank rather than invented: some providers never say when the window rolls.
     private var resetText: String {
-        window.resetsAt.map {
-            ResetCopy.text(for: $0, now: now, rollover: window.rollsOverAs)
-        } ?? ""
+        window.resetsAt.map { ResetCopy.text(for: $0, now: now) } ?? ""
     }
 
     var body: some View {
@@ -262,12 +260,10 @@ private struct LimitWindowRow: View {
                 .padding(.top, NotchLayout.labelToBar)
             }
 
-            if !window.summary.isEmpty {
-                Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)")
-                    .font(Typography.cardBody)
-                    .foregroundStyle(Palette.textPrimary)
-                    .padding(.top, NotchLayout.barToUsed)
-            }
+            Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)")
+                .font(Typography.cardBody)
+                .foregroundStyle(Palette.textPrimary)
+                .padding(.top, NotchLayout.barToUsed)
         }
     }
 }
@@ -287,10 +283,6 @@ private struct ProviderTooltip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Reading age stays on the header. The bill date used to share
-            // that slot and lost it the moment a relaunch marked the numbers
-            // stale — which is exactly when someone opens the tooltip to
-            // check when the plan renews.
             TooltipHeader(title: "\(snapshot.displayName) Usage", note: readingAge) {
                 ProviderGlyphView(glyph: snapshot.glyph)
                     .foregroundStyle(Palette.textPrimary)
@@ -308,19 +300,9 @@ private struct ProviderTooltip: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, NotchLayout.headerToBlock)
             } else {
-                let renewal = snapshot.renewalCopy(now: now)
-                if let renewal {
-                    Text(renewal)
-                        .font(Typography.cardBody)
-                        .foregroundStyle(Palette.textPrimary)
-                        .padding(.top, NotchLayout.headerToBlock)
-                }
-
-                ForEach(Array(snapshot.usageWindows.enumerated()), id: \.element.id) { index, window in
+                ForEach(Array(snapshot.windows.enumerated()), id: \.element.id) { index, window in
                     LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now)
-                        .padding(.top, index == 0 && renewal == nil
-                                 ? NotchLayout.headerToBlock
-                                 : NotchLayout.blockSpacing)
+                        .padding(.top, index == 0 ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
                 }
             }
         }
@@ -456,10 +438,11 @@ struct TooltipCard: View {
     /// reachable can never drift apart.
     private var height: CGFloat {
         NotchLayout.cardHeight(
-            for: snapshot,
+            windowCount: snapshot.windows.count,
             sessionCount: activity?.sessions.count ?? 0,
             sessionCap: sessionCap,
-            now: now
+            statusMessage: snapshot.statusMessage,
+            blockMessage: snapshot.block?.summary(now: now)
         )
     }
 

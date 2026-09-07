@@ -145,9 +145,6 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(
             for: NSWindow.didBecomeKeyNotification
         )) { _ in accounts = providers() }
-        .onReceive(NotificationCenter.default.publisher(
-            for: .usageSnapshotsDidChange
-        )) { _ in accounts = providers() }
     }
 
     private var credit: some View {
@@ -323,10 +320,6 @@ private struct AccountRow: View {
                             .buttonStyle(.link)
                             .help(provider.signIn.switchHint)
                     }
-                }
-                if let renewal = provider.renewal {
-                    Text(renewal)
-                        .foregroundStyle(.primary)
                 }
                 // Says where the account actually lives, which is the whole
                 // answer to "how do I change it" — not here.
