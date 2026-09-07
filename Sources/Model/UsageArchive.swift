@@ -14,6 +14,8 @@ struct UsageArchive {
         let fidelity: Fidelity
         let windows: [LimitWindow]
         let fetchedAt: Date
+        /// Optional so archives written before this field still decode.
+        let headlineID: String?
     }
 
     private let defaults: UserDefaults
@@ -71,7 +73,8 @@ struct UsageArchive {
                 glyph: entry.glyph,
                 fidelity: entry.fidelity,
                 status: .stale(since: entry.fetchedAt),
-                windows: entry.windows
+                windows: entry.windows,
+                headlineID: entry.headlineID
             )
             result[entry.id] = (snapshot, entry.fetchedAt)
         }
@@ -86,7 +89,8 @@ struct UsageArchive {
                 glyph: $0.snapshot.glyph,
                 fidelity: $0.snapshot.fidelity,
                 windows: $0.snapshot.windows,
-                fetchedAt: $0.fetchedAt
+                fetchedAt: $0.fetchedAt,
+                headlineID: $0.snapshot.headlineID
             )
         }
         guard let data = try? JSONEncoder().encode(entries) else { return }
