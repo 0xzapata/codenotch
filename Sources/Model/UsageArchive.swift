@@ -68,7 +68,7 @@ struct UsageArchive {
             // Older Codex readings came from rollouts and may include quotas
             // the live provider no longer displays. Wait for a fresh reading.
             if entry.id == "codex",
-               entry.windows.contains(where: { $0.id != "session" && $0.id != "weekly" }) {
+               entry.windows.contains(where: { $0.id != "primary" && $0.id != "secondary" }) {
                 continue
             }
             let snapshot = ProviderSnapshot(

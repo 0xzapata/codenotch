@@ -17,10 +17,36 @@ final class CodexUsageTests: XCTestCase {
          "code_review_rate_limit":{"primary_window":{"used_percent":90,"limit_window_seconds":604800}},
          "credits":{"balance":"100"},"model_usage":{"spark":99}}
         """)
-        XCTAssertEqual(result.map(\.id), ["session", "weekly"])
+        XCTAssertEqual(result.map(\.id), ["primary", "secondary"])
         XCTAssertEqual(result.map(\.label), ["5h limit", "Weekly limit"])
         XCTAssertEqual(result.map(\.usedFraction), [0.25, 0.10])
         XCTAssertEqual(result.first?.resetsAt, Date(timeIntervalSince1970: 1_800_001_000))
+    }
+
+    /// The reported case: a free-plan account's primary window was 30 days,
+    /// not 5 hours or 7 — recorded from a live request. The old parser only
+    /// recognised two fixed durations and silently dropped anything else,
+    /// which on this exact account meant every window vanished and the ring
+    /// reported nothing metered on an account that was genuinely 16% through
+    /// a real limit.
+    func testAMonthlyPrimaryWindowIsNotDropped() throws {
+        let result = try windows("""
+        {"rate_limit":{"primary_window":{"used_percent":16,"limit_window_seconds":2592000,
+        "reset_after_seconds":1838382,"reset_at":1790585722},"secondary_window":null},
+         "plan_type":"free"}
+        """)
+        XCTAssertEqual(result.map(\.id), ["primary"])
+        XCTAssertEqual(result.first?.label, "Monthly limit")
+        XCTAssertEqual(result.first?.usedFraction ?? -1, 0.16, accuracy: 0.0001)
+    }
+
+    /// A duration that is none of the named buckets still gets a usable label
+    /// instead of being the thing that makes the fetch fail.
+    func testAnUnrecognisedDurationStillGetsALabel() throws {
+        let result = try windows("""
+        {"rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":259200}}}
+        """)
+        XCTAssertEqual(result.first?.label, "3d limit")
     }
 
     // The endpoint can put a weekly-only allowance in primary_window.
@@ -29,7 +55,8 @@ final class CodexUsageTests: XCTestCase {
         {"rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":604800,
         "reset_after_seconds":604119,"reset_at":1789308033},"secondary_window":null}}
         """)
-        XCTAssertEqual(result.map(\.id), ["weekly"])
+        XCTAssertEqual(result.map(\.id), ["primary"])
+        XCTAssertEqual(result.first?.label, "Weekly limit")
         XCTAssertEqual(result.first?.resetsAt, Date(timeIntervalSince1970: 1_789_308_033))
     }
 
@@ -39,10 +66,11 @@ final class CodexUsageTests: XCTestCase {
         "primary_window":{"used_percent":8,"limit_window_seconds":604800},
         "secondary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_after_seconds":120}}}
         """)
-        XCTAssertEqual(result.map(\.id), ["session", "weekly"])
-        XCTAssertEqual(result.first?.usedFraction, 0)
-        XCTAssertEqual(result.first?.resetsAt, Date(timeIntervalSince1970: 1_800_000_120))
-        XCTAssertNil(result.last?.resetsAt)
+        XCTAssertEqual(result.map(\.id), ["primary", "secondary"])
+        XCTAssertEqual(result.first?.usedFraction, 0.08)
+        XCTAssertNil(result.first?.resetsAt)
+        XCTAssertEqual(result.last?.usedFraction, 0)
+        XCTAssertEqual(result.last?.resetsAt, Date(timeIntervalSince1970: 1_800_000_120))
     }
 }
 

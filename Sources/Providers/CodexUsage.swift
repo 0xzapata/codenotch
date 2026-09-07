@@ -1,6 +1,8 @@
 import Foundation
 
-/// Only the account's main five-hour and weekly limits belong in the usage rings.
+/// Only the account's main rate-limit windows belong in the usage rings —
+/// `additional_rate_limits` and `code_review_rate_limit` meter something else
+/// and are deliberately left out.
 enum CodexUsage {
     private struct Response: Decodable {
         let rate_limit: RateLimit?
@@ -27,34 +29,46 @@ enum CodexUsage {
         }
 
         var windows: [LimitWindow] = []
-        if let limits = response.rate_limit {
-            for window in [limits.primary_window, limits.secondary_window].compactMap({ $0 }) {
-                let id: String
-                let label: String
-                switch window.limit_window_seconds {
-                case 18_000:
-                    id = "session"
-                    label = "5h limit"
-                case 604_800:
-                    id = "weekly"
-                    label = "Weekly limit"
-                default:
-                    continue
-                }
-                guard let percent = window.used_percent else {
-                    throw UsageProviderError.badResponse(status: 0)
-                }
-                guard !windows.contains(where: { $0.id == id }) else { continue }
-                let resetsAt = window.reset_at.map { Date(timeIntervalSince1970: $0) }
-                    ?? window.reset_after_seconds.map { now.addingTimeInterval($0) }
-                windows.append(LimitWindow(
-                    id: id, label: label, usedFraction: percent / 100, resetsAt: resetsAt
-                ))
+        for (id, window) in [("primary", response.rate_limit?.primary_window),
+                             ("secondary", response.rate_limit?.secondary_window)] {
+            guard let window else { continue }
+            guard let percent = window.used_percent else {
+                throw UsageProviderError.badResponse(status: 0)
             }
+            let resetsAt = window.reset_at.map { Date(timeIntervalSince1970: $0) }
+                ?? window.reset_after_seconds.map { now.addingTimeInterval($0) }
+            windows.append(LimitWindow(
+                id: id,
+                label: label(windowSeconds: window.limit_window_seconds, fallback: id),
+                usedFraction: percent / 100,
+                resetsAt: resetsAt
+            ))
         }
         guard !windows.isEmpty else {
-            throw UsageProviderError.nothingMetered("Codex reported no 5-hour or weekly usage limits")
+            throw UsageProviderError.nothingMetered("Codex reported no usage windows")
         }
-        return windows.sorted { $0.id == "session" && $1.id != "session" }
+        return windows
+    }
+
+    /// The plan an account is on decides what its primary window actually is
+    /// — a free plan has shown a 30-day window here, not the 5-hour one a paid
+    /// plan reports — so the label is derived from the length Codex actually
+    /// sent rather than assumed from a fixed pair of durations. Getting this
+    /// wrong doesn't mislabel the window, it drops it: an unrecognised length
+    /// used to be silently skipped, which on a free account left both windows
+    /// absent and the ring reporting nothing metered at all.
+    static func label(windowSeconds: Double, fallback: String) -> String {
+        guard windowSeconds > 0 else {
+            return fallback == "primary" ? "Current session" : "Longer window"
+        }
+        let minutes = windowSeconds / 60
+        if minutes < 60 { return "\(Int(minutes))m limit" }
+        if minutes < 60 * 24 { return "\(Int(minutes / 60))h limit" }
+        let days = Int((minutes / (60 * 24)).rounded())
+        switch days {
+        case 7:  return "Weekly limit"
+        case 30: return "Monthly limit"
+        default: return "\(days)d limit"
+        }
     }
 }
