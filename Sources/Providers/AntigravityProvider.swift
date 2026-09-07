@@ -96,9 +96,15 @@ actor AntigravityProvider: UsageProvider {
         // running on the same machine, never asked.
         if let windows = await localQuota(), !windows.isEmpty {
             everBridged = true
+            
+            // Antigravity now has multiple limits (Weekly, 5-hour).
+            // The user prefers the 'hour' limit to be shown as the main notch ring percentage.
+            let hourlies = windows.filter { $0.id.lowercased().contains("hour") || $0.label.lowercased().contains("hour") }
+            let mostConstrained = hourlies.max(by: { ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0) }) ?? windows.max(by: { ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0) })
+            
             return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                     fidelity: .official, status: .ok, windows: windows,
-                                    headlineID: "gemini-weekly")
+                                    headlineID: mostConstrained?.id ?? "gemini-hourly")
         }
 
         // Antigravity has answered before and is not answering now: it has been
