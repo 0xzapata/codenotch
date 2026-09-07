@@ -1,8 +1,27 @@
+# Only if the caller hasn't already chosen a toolchain (`$DEVELOPER_DIR`, or
+# `sudo xcode-select -s`) and the standard path actually exists — exporting a
+# path that isn't there breaks every target with `xcrun: missing DEVELOPER_DIR`
+# on a machine that only has the Command Line Tools installed.
+ifeq (,$(DEVELOPER_DIR))
+ifneq (,$(wildcard /Applications/Xcode.app/Contents/Developer))
 export DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
+endif
+endif
 
 PROJECT := Codenotch.xcodeproj
 SCHEME  := Codenotch
 DEST    := platform=macOS,arch=arm64
+
+# Debug ad-hoc signs itself when the maintainer's Developer ID certificate
+# isn't in the keychain, which is every machine but the maintainer's — so a
+# contributor can `make build`/`make test`/`make run` with no Apple account at
+# all, per CONTRIBUTING.md. On the maintainer's own machine this is empty and
+# changes nothing: project.yml's stable identity is what keeps a keychain
+# "Always Allow" grant alive across rebuilds, and forcing ad-hoc there would
+# throw that away and bring the prompt back on every `make run`.
+ifeq (,$(shell security find-identity -v -p codesigning 2>/dev/null | grep -c "Developer ID Application"))
+DEV_SIGN := CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="" CODE_SIGN_STYLE=Automatic
+endif
 
 .PHONY: gen build test run clean
 
@@ -11,11 +30,11 @@ gen:
 
 build: gen
 	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
-		-configuration Debug build
+		-configuration Debug $(DEV_SIGN) build
 
 test: gen
 	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
-		-configuration Debug test
+		-configuration Debug $(DEV_SIGN) test
 
 run: build
 	@APP=$$(xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
