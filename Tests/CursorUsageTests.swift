@@ -29,7 +29,26 @@ final class CursorUsageTests: XCTestCase {
         XCTAssertEqual(w[0].id, "auto")
         XCTAssertEqual(w[0].label, CursorUsage.modelsLabel)
         XCTAssertEqual(w[0].usedFraction ?? -1, 0, accuracy: 0.0001)
+        XCTAssertEqual(w[0].duration, 31 * 86400)
         XCTAssertEqual(CursorUsage.headlineID(in: w), "auto")
+    }
+
+    func testMonthlyPaceUsesActualBillingDates() throws {
+        for days in [28, 29, 30, 31] {
+            let start = Date(timeIntervalSince1970: 1_800_000_000)
+            let end = start.addingTimeInterval(Double(days) * 86400)
+            let iso = ISO8601DateFormatter()
+            let result = try windows("""
+            {"billingCycleStart":"\(iso.string(from: start))",
+             "billingCycleEnd":"\(iso.string(from: end))",
+             "individualUsage":{"plan":{"autoPercentUsed":80}}}
+            """)
+            let window = try XCTUnwrap(result.first)
+            let halfway = start.addingTimeInterval(Double(days) * 43200)
+            XCTAssertEqual(window.duration, Double(days) * 86400)
+            XCTAssertEqual(try XCTUnwrap(window.usagePace(now: halfway)).percentagePoints, 30,
+                           accuracy: 0.00001)
+        }
     }
 
     func testApiUsageIsReportedSeparately() throws {

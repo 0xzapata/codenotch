@@ -17,6 +17,7 @@ final class CodexUsageTests: XCTestCase {
          "code_review_rate_limit":{"primary_window":{"used_percent":90,"limit_window_seconds":604800}},
          "credits":{"balance":"100"},"model_usage":{"spark":99}}
         """)
+        XCTAssertEqual(result.map(\.duration), [18000, 604800])
         XCTAssertEqual(result.map(\.id), ["primary", "secondary"])
         XCTAssertEqual(result.map(\.label), ["5h limit", "Weekly limit"])
         XCTAssertEqual(result.map(\.usedFraction), [0.25, 0.10])
@@ -38,6 +39,20 @@ final class CodexUsageTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["primary"])
         XCTAssertEqual(result.first?.label, "Monthly limit")
         XCTAssertEqual(result.first?.usedFraction ?? -1, 0.16, accuracy: 0.0001)
+    }
+
+    func testPaceUsesTheReportedCycleRegardlessOfPlanName() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        for seconds in [18000, 604800, 2592000] {
+            let result = try CodexUsage.windows(from: Data("""
+            {"rate_limit":{"primary_window":{"used_percent":80,
+            "limit_window_seconds":\(seconds),"reset_after_seconds":\(seconds / 2)}}}
+            """.utf8), now: now)
+            let window = try XCTUnwrap(result.first)
+            XCTAssertEqual(window.duration, Double(seconds))
+            XCTAssertEqual(try XCTUnwrap(window.usagePace(now: now)).percentagePoints, 30,
+                           accuracy: 0.00001)
+        }
     }
 
     /// A duration that is none of the named buckets still gets a usable label
@@ -66,6 +81,7 @@ final class CodexUsageTests: XCTestCase {
         "primary_window":{"used_percent":8,"limit_window_seconds":604800},
         "secondary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_after_seconds":120}}}
         """)
+        XCTAssertEqual(result.map(\.duration), [604800, 18000])
         XCTAssertEqual(result.map(\.id), ["primary", "secondary"])
         XCTAssertEqual(result.first?.usedFraction, 0.08)
         XCTAssertNil(result.first?.resetsAt)
@@ -277,4 +293,3 @@ final class UsageBlockTests: XCTestCase {
         )
     }
 }
-

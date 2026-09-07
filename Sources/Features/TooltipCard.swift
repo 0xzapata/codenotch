@@ -256,6 +256,7 @@ private struct LimitWindowRow: View {
     let fidelity: Fidelity
     let now: Date
     let resetTimeFormat: ResetTimeFormat
+    let showsUsagePace: Bool
     @Environment(\.codenotchAccentColor) private var accentColor
 
     private var band: UsageBand { UsageBand.band(for: window.usedFraction ?? 0) }
@@ -263,6 +264,14 @@ private struct LimitWindowRow: View {
     private var fillWidth: CGFloat {
         let fraction = CGFloat(min(max(window.usedFraction ?? 0, 0), 1))
         return max(NotchLayout.barHeight, trackWidth * fraction)
+    }
+
+    private var paceText: Text {
+        guard showsUsagePace, let pace = window.usagePace(now: now) else {
+            return Text("")
+        }
+        return Text(" · \(pace.summary)")
+            .foregroundColor(pace.isDeficit ? .orange : Palette.textSecondary)
     }
 
     /// Blank rather than invented: some providers never say when the window rolls.
@@ -285,9 +294,11 @@ private struct LimitWindowRow: View {
                 .padding(.top, NotchLayout.labelToBar)
             }
 
-            Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)")
+            Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)\(paceText)")
                 .font(Typography.cardBody)
                 .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .padding(.top, NotchLayout.barToUsed)
         }
     }
@@ -297,6 +308,7 @@ private struct ProviderTooltip: View {
     let snapshot: ProviderSnapshot
     let now: Date
     let resetTimeFormat: ResetTimeFormat
+    let showUsagePace: Bool
 
     /// Only worth saying when the numbers are not current. A remembered reading
     /// has to be dated, or it quietly passes itself off as live.
@@ -328,7 +340,8 @@ private struct ProviderTooltip: View {
             } else {
                 ForEach(Array(snapshot.windows.enumerated()), id: \.element.id) { index, window in
                     LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now,
-                                   resetTimeFormat: resetTimeFormat)
+                                   resetTimeFormat: resetTimeFormat,
+                                   showsUsagePace: showUsagePace)
                         .padding(.top, index == 0 ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
                 }
             }
@@ -462,6 +475,7 @@ struct TooltipCard: View {
     /// rather than fixed, so a big screen hides nothing.
     var sessionCap: Int = NotchLayout.defaultSessionCap
     var resetTimeFormat: ResetTimeFormat = .automatic
+    @AppStorage(Preferences.showUsagePaceKey) private var showUsagePace = false
 
     /// The same figure the hover region uses, so what is drawn and what is
     /// reachable can never drift apart.
@@ -483,7 +497,9 @@ struct TooltipCard: View {
             // drifts while the card resizes around them.
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ProviderTooltip(snapshot: snapshot, now: now, resetTimeFormat: resetTimeFormat)
+                    ProviderTooltip(snapshot: snapshot, now: now,
+                                    resetTimeFormat: resetTimeFormat,
+                                    showUsagePace: showUsagePace)
                     if let activity {
                         SessionList(summary: activity, now: now, cap: sessionCap)
                     }

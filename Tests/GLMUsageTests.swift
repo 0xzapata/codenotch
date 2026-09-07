@@ -26,6 +26,7 @@ final class GLMQuotaResponseTests: XCTestCase {
 
     func testDecodesTheLiveShape() throws {
         let payload = try parse(live)
+        XCTAssertEqual(payload.windows.map(\.duration), [18000, 604800, nil])
         XCTAssertEqual(payload.level, "pro")
         XCTAssertEqual(payload.windows.map(\.id), ["session", "weekly", "mcp"])
         XCTAssertEqual(payload.windows[0].label, "Current session")

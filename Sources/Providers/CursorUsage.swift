@@ -54,6 +54,9 @@ enum CursorUsage {
         else { throw UsageProviderError.badResponse(status: 0) }
 
         let resetsAt = date(root["billingCycleEnd"])
+        let duration = date(root["billingCycleStart"]).flatMap { start in
+            resetsAt.map { $0.timeIntervalSince(start) }
+        }
         let usage = root["individualUsage"] as? [String: Any] ?? [:]
         let plan = usage["plan"] as? [String: Any] ?? [:]
         let team = root["teamUsage"] as? [String: Any] ?? [:]
@@ -63,14 +66,17 @@ enum CursorUsage {
         // Zero is a reading, not an absence — a fresh month is 0% on this bar.
         if let models = percent(plan["autoPercentUsed"]) {
             windows.append(LimitWindow(id: "auto", label: modelsLabel,
-                                       usedFraction: models, resetsAt: resetsAt))
+                                       usedFraction: models, resetsAt: resetsAt,
+                                       duration: duration))
         }
         if let api = percent(plan["apiPercentUsed"]), api > 0 {
             windows.append(LimitWindow(id: "api", label: "API usage",
-                                       usedFraction: api, resetsAt: resetsAt))
+                                       usedFraction: api, resetsAt: resetsAt,
+                                       duration: duration))
         }
         if let onDemand = spendWindow(usage["onDemand"], id: "on_demand",
-                                      label: "On demand", resetsAt: resetsAt) {
+                                      label: "On demand", resetsAt: resetsAt,
+                                      duration: duration) {
             windows.append(onDemand)
         }
 
@@ -79,11 +85,13 @@ enum CursorUsage {
         // provider's headlineID still resolves.
         if windows.isEmpty,
            let overall = spendWindow(usage["overall"], id: "included",
-                                     label: "Included usage", resetsAt: resetsAt) {
+                                     label: "Included usage", resetsAt: resetsAt,
+                                     duration: duration) {
             windows.append(overall)
         }
         if let teamOnDemand = spendWindow(team["onDemand"], id: "team_on_demand",
-                                          label: "Team on demand", resetsAt: resetsAt),
+                                          label: "Team on demand", resetsAt: resetsAt,
+                                          duration: duration),
            (teamOnDemand.usedFraction ?? 0) > 0 {
             windows.append(teamOnDemand)
         }
@@ -99,14 +107,15 @@ enum CursorUsage {
 
     /// A dollar-denominated bucket, used where a plan states a real ceiling.
     private static func spendWindow(
-        _ any: Any?, id: String, label: String, resetsAt: Date?
+        _ any: Any?, id: String, label: String, resetsAt: Date?, duration: TimeInterval?
     ) -> LimitWindow? {
         guard let bucket = any as? [String: Any],
               (bucket["enabled"] as? Bool) == true,
               let limit = (bucket["limit"] as? NSNumber)?.doubleValue, limit > 0,
               let used = (bucket["used"] as? NSNumber)?.doubleValue
         else { return nil }
-        return LimitWindow(id: id, label: label, usedFraction: used / limit, resetsAt: resetsAt)
+        return LimitWindow(id: id, label: label, usedFraction: used / limit,
+                           resetsAt: resetsAt, duration: duration)
     }
 
     /// Cursor reports 0–100; the rest of the app works in 0–1.

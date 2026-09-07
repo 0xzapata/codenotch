@@ -86,14 +86,19 @@ struct LimitWindow: Identifiable, Codable, Equatable {
     /// Nil when the provider does not say when the window rolls over.
     let resetsAt: Date?
 
+    /// Exact cycle length when known; optional to keep older archives readable.
+    let duration: TimeInterval?
+
     init(id: String, label: String, usedFraction: Double? = nil,
-         remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil) {
+         remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil,
+         duration: TimeInterval? = nil) {
         self.id = id
         self.label = label
         self.usedFraction = usedFraction
         self.remaining = remaining
         self.used = used
         self.resetsAt = resetsAt
+        self.duration = duration
     }
 
     /// A count short enough to sit inside a 44 pt ring.

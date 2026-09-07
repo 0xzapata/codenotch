@@ -139,6 +139,7 @@ enum AntigravityBridge {
                 let displayName: String?
                 let remainingFraction: Double?
                 let resetTime: String?
+                let window: String?
             }
             struct Group: Decodable {
                 let displayName: String?
@@ -163,7 +164,8 @@ enum AntigravityBridge {
                     // "Weekly Limit Remaining", which is the same for both.
                     label: group.displayName ?? bucket.displayName ?? "Usage",
                     usedFraction: 1 - remaining,
-                    resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse)
+                    resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse),
+                    duration: bucket.window == "weekly" ? 7 * 86400 : nil
                 )
             }
         }
