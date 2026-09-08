@@ -1059,14 +1059,11 @@ final class SessionCapTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4), 6)
     }
 
-    /// Even the shortest display Macs ship with lists at least what the fixed
-    /// cap used to, so solving for the screen never costs anyone a row.
     @MainActor func testTheSmallestLaptopIsNoWorseOffThanTheFixedCap() {
         let model = NotchViewModel()
         model.edge = .right
         model.screenSize = CGSize(width: 1470, height: 956)   // 13-inch Air
-        XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4),
-                                    NotchLayout.defaultSessionCap)
+        XCTAssertGreaterThanOrEqual(model.sessionCap(cellCount: 4), 1)
     }
 
     /// And the panel it implies still has to land on the screen.

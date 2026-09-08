@@ -369,7 +369,7 @@ enum NotchLayout {
     /// is a sum of a dozen named parts, and an inverted copy of it would have
     /// to be kept in step by hand. The range is short enough that the search
     /// costs nothing.
-    static func sessionsFitting(cardBudget: CGFloat, windowCount: Int, groupCount: Int = 0) -> Int {
+    static func sessionsFitting(cardBudget: CGFloat, windowCount: Int, groupCount: Int = 2) -> Int {
         var fits = 0
         for n in 1...sessionCeiling {
             // Costed as though something were still hidden, so that admitting
