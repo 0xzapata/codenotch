@@ -2,6 +2,23 @@ import AppKit
 import CoreTransferable
 import SwiftUI
 
+/// A Liquid Glass background that falls back to a regular material on macOS
+/// 15, where `glassEffect` does not exist. The visual difference is minor — the
+/// sidebar gets a standard vibrancy material instead of the glass tint — and
+/// the layout and interactions are unchanged.
+extension View {
+    @ViewBuilder
+    func glassBackground(in shape: some Shape) -> some View {
+        if #available(macOS 26.0, *) {
+            background { Color.clear.glassEffect(.regular, in: shape) }
+        } else {
+            background {
+                shape.fill(.regularMaterial)
+            }
+        }
+    }
+}
+
 /// One entry in the sidebar. Grouped by subject rather than by how each
 /// setting is stored — a mute toggle for a provider's threshold alerts lives
 /// on that provider's own row in Accounts, not repeated here, but the
@@ -226,13 +243,10 @@ struct SettingsView: View {
         // sidebar on this OS — not a flat tint over the window's material.
         // The glass is what gives the card an edge and a lift of its own, so
         // there is no border drawn on top of it.
-        .background {
-            Color.clear.glassEffect(
-                .regular,
-                in: RoundedRectangle(cornerRadius: SettingsView.sidebarCornerRadius,
-                                     style: .continuous)
-            )
-        }
+        .glassBackground(
+            in: RoundedRectangle(cornerRadius: SettingsView.sidebarCornerRadius,
+                                 style: .continuous)
+        )
         .padding(SettingsView.sidebarInset)
     }
 
@@ -262,7 +276,7 @@ struct SettingsView: View {
                 .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(.primary)
                 .frame(width: 36, height: 36)
-                .background { Color.clear.glassEffect(.regular, in: Circle()) }
+                .glassBackground(in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

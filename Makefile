@@ -46,7 +46,7 @@ DEV_SIGN := CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Manual \
 endif
 endif
 
-.PHONY: gen build test test-ci run clean
+.PHONY: gen build test test-ci run install clean
 
 gen:
 	xcodegen generate
@@ -73,6 +73,24 @@ run: build
 		| awk -F' = ' '/ BUILT_PRODUCTS_DIR/ {print $$2; exit}')/Codenotch.app; \
 	pkill -x Codenotch || true; \
 	open "$$APP"
+
+# Build a Release .app, sign it with whatever identity is available (Developer
+# ID, Apple Development, or ad-hoc — the same auto-detection as `DEV_SIGN`),
+# and copy it to /Applications. For a contributor who wants a permanent copy
+# without the notarized release path. Gatekeeper may ask for a one-time
+# right-click → Open on the first launch when the build is not Developer ID
+# signed. The app embeds Sparkle, and macOS rejects a bundle whose framework
+# and binary carry different Team IDs, so the whole bundle is signed with one
+# identity rather than left unsigned.
+install: gen
+	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
+		-configuration Release $(DEV_SIGN) build
+	@APP=$$(xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
+		-configuration Release -showBuildSettings 2>/dev/null \
+		| awk -F' = ' '/ BUILT_PRODUCTS_DIR/ {print $$2; exit}')/Codenotch.app; \
+	pkill -x Codenotch || true; \
+	cp -R "$$APP" /Applications/; \
+	open /Applications/Codenotch.app
 
 clean:
 	rm -rf build DerivedData $(PROJECT)
