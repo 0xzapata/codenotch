@@ -10,9 +10,17 @@ enum ProviderGlyph: String, Codable, Equatable {
     /// written under, and renaming it would make every stored reading for this
     /// provider undecodable.
     case antigravity = "gemini"
+    /// Gemini's own sparkle, for the provider that meters a raw API key.
+    ///
+    /// It cannot be called `gemini`: that raw value already names Antigravity's
+    /// arch inside every archived snapshot, and swapping its meaning would
+    /// redraw old readings as a mark they were never written for. So the
+    /// sparkle gets a key of its own instead.
+    case geminiSpark = "gemini-spark"
     case glm
     case grok
     case opencode
+    case copilot
 
     /// If an asset with this name is in the bundle it wins over the traced
     /// outline — drop a PDF/SVG export from Figma in and it is picked up.
@@ -35,9 +43,11 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .cursor: return 0.97
         case .openai: return 0.94
         case .antigravity: return 1.0
+        case .geminiSpark: return 1.0
         case .glm:    return 0.95
         case .grok:   return 1.0
         case .opencode: return 0.95
+        case .copilot: return 0.96
         case .third:  return 1.0
         }
     }
@@ -49,9 +59,11 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .third:  return GlyphOutline.third
         case .cursor: return GlyphOutline.cursor
         case .antigravity: return GlyphOutline.antigravity
+        case .geminiSpark: return GlyphOutline.gemini
         case .glm:    return GlyphOutline.glm
         case .grok:   return GlyphOutline.grok
         case .opencode: return GlyphOutline.opencode
+        case .copilot: return GlyphOutline.copilot
         }
     }
 }
