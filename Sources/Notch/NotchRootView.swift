@@ -34,12 +34,18 @@ struct NotchRootView: View {
                         // the AppKit-level path did not.
                         .contentShape(Circle())
                         .onTapGesture { model.onOpenSettings?() }
+                        // Before `position`, not after. `position` hands back a
+                        // view the size of the whole panel with the orb placed
+                        // inside it, so a scale applied after this one scales
+                        // *that* layer about the panel's centre — which moves
+                        // the orb away from the notch by a share of the panel,
+                        // and left the arc floating off the corner it is drawn
+                        // to hug. Here it scales the orb about its own centre,
+                        // which is what `orbCentre` then places.
+                        .scaleEffect(model.sizeScale)
                         .position(orbCentre(place))
                         // Outward, into the black — not inward to nothing.
                         .scaleEffect(model.isExpanded ? 1 : model.orbMergeScale)
-                        // And the size choice on top of that, so the orb keeps
-                        // its proportion to the notch it hangs off.
-                        .scaleEffect(model.sizeScale)
                         // Full strength the whole way in. The arc is buried in
                         // the notch before this reaches zero, so the fade is
                         // only there to guarantee nothing is left on screen
