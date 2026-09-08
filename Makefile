@@ -30,12 +30,11 @@ HAS_DEVELOPER_ID := $(shell security find-identity -v -p codesigning 2>/dev/null
 # over ad-hoc for exactly the reason the maintainer's identity is: it is
 # stable, so a keychain "Always Allow" grant survives the next rebuild, and
 # working on the credential-reading paths does not mean re-granting after every
-# build. Its team is read out of the certificate itself, since manual signing
-# will not proceed without one; with nothing parsed, ad-hoc is the fallback and
-# needs no Apple account.
-DEV_TEAM := $(shell security find-certificate -c "Apple Development" -p 2>/dev/null \
-	| openssl x509 -noout -subject 2>/dev/null \
-	| sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p')
+# build. Read its team from a valid signing identity: a certificate can remain
+# in the keychain without its private key, and choosing it would fail the
+# build. With nothing parsed, ad-hoc is the fallback and needs no Apple account.
+DEV_TEAM := $(shell security find-identity -v -p codesigning 2>/dev/null \
+	| sed -n 's/.*"Apple Development: .* (\([A-Z0-9]*\))".*/\1/p' | head -1)
 
 ifeq (,$(HAS_DEVELOPER_ID))
 ifeq (,$(DEV_TEAM))
