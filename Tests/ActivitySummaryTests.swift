@@ -201,7 +201,12 @@ final class CursorActivityTests: XCTestCase {
         let atTheEdge = try XCTUnwrap(session(fixture, staleAfter: 60,
                                               now: runAt.addingTimeInterval(60)))
         XCTAssertEqual(atTheEdge.state, .busy)
-        XCTAssertNil(session(fixture, staleAfter: 60, now: runAt.addingTimeInterval(61)))
+        
+        let justPastEdge = try XCTUnwrap(session(fixture, staleAfter: 60,
+                                                 now: runAt.addingTimeInterval(61)))
+        XCTAssertEqual(justPastEdge.state, .idle)
+        
+        XCTAssertNil(session(fixture, staleAfter: 60, now: runAt.addingTimeInterval(76)))
     }
 
     /// `unfinishedRunAt` is set while a run is in flight and cleared when it ends.

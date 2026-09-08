@@ -164,9 +164,18 @@ final class CursorActivityMonitor: ObservableObject, AgentActivityMonitor {
             return now.timeIntervalSince(touched) <= staleAfter
         }()
 
+        let isRecentlyFinished: Bool = {
+            guard let runStart, let cursorLaunchedAt else { return false }
+            let touched = lastWrite ?? runStart
+            guard touched >= cursorLaunchedAt else { return false }
+            let age = now.timeIntervalSince(touched)
+            return age > staleAfter && age <= staleAfter + 15
+        }()
+
         let state: AgentSession.State
         if blocked { state = .waiting }
         else if isRunning { state = .busy }
+        else if isRecentlyFinished { state = .idle }
         else { return nil }
 
         // `runStart` is the composer's creation time, so it dates a busy row the
