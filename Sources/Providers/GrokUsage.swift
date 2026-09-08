@@ -54,6 +54,23 @@ enum GrokUsage {
             }
         }
 
+        // A weekly plan pool (X Premium+, SuperGrok) states its window in
+        // `currentPeriod` and omits `creditUsagePercent`/`productUsage` until
+        // usage lands, so the branches above find nothing on a fresh period.
+        // Grok's own `/usage` still shows this as a "Weekly limit" bar at 0%
+        // with the period end as the reset, so mirror it rather than reporting
+        // the account as unmetered.
+        if windows.isEmpty,
+           let weekly = period(credits["currentPeriod"]),
+           (weekly["type"] as? String).map({ $0.contains("WEEKLY") }) == true {
+            windows.append(LimitWindow(
+                id: "credits",
+                label: "Weekly limit",
+                usedFraction: 0,
+                resetsAt: date(weekly["end"]) ?? creditsReset
+            ))
+        }
+
         guard !windows.isEmpty else {
             throw UsageProviderError.nothingMetered("Grok has nothing metered on this account yet")
         }
