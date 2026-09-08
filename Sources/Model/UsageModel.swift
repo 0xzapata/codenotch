@@ -219,6 +219,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
         case "glm":        return "Set up a GLM Coding Plan key for a coding tool to read your usage"
         case "copilot":    return "Sign in with GitHub CLI to read your Copilot usage"
         case "opencode":   return "Connect the Go plan in OpenCode to read your usage"
+        case "ollama", "ollama-local": return "Start Ollama to monitor your local models"
         default:           return "Sign in to \(displayName) to read your usage"
         }
     }

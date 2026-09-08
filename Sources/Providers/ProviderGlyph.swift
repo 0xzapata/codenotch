@@ -21,6 +21,8 @@ enum ProviderGlyph: String, Codable, Equatable {
     case grok
     case opencode
     case copilot
+    case ollama
+    case ollamaLocal = "ollama-local"
 
     /// If an asset with this name is in the bundle it wins over the traced
     /// outline — drop a PDF/SVG export from Figma in and it is picked up.
@@ -49,6 +51,7 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .opencode: return 0.95
         case .copilot: return 0.96
         case .third:  return 1.0
+        case .ollama, .ollamaLocal: return 0.98
         }
     }
 
@@ -64,6 +67,7 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .grok:   return GlyphOutline.grok
         case .opencode: return GlyphOutline.opencode
         case .copilot: return GlyphOutline.copilot
+        case .ollama, .ollamaLocal: return GlyphOutline.ollama
         }
     }
 }

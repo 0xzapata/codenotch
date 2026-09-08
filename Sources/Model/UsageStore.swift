@@ -90,6 +90,8 @@ final class UsageStore: ObservableObject {
     /// never depends on when the task body happens to start.
     private var isRefreshing = false
     private var wakeObserver: NSObjectProtocol?
+    private var appLaunchObserver: NSObjectProtocol?
+    private var appTerminateObserver: NSObjectProtocol?
 
     init(
         providers: [UsageProvider],
@@ -131,7 +133,10 @@ final class UsageStore: ObservableObject {
         // Filtered here, not only in `didSet`. The store is built before the
         // preference reaches it, so an unfiltered first pass draws every
         // switched-off provider for as long as it takes the binding to arrive.
-        snapshots = orderedProviders.filter { !disconnected.contains($0.id) }.map { provider in
+        snapshots = orderedProviders.filter { !disconnected.contains($0.id) }.compactMap { provider in
+            if !provider.isVisibleWhenAbsent && provider.account() == nil {
+                return nil
+            }
             guard let remembered = lastGood[provider.id] else { return Self.placeholder(provider) }
             var snapshot = remembered.snapshot
             snapshot.status = .stale(since: remembered.fetchedAt)
@@ -165,6 +170,25 @@ final class UsageStore: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshNow() }
         }
+
+        // Detect apps launching or quitting (e.g. Ollama) so dynamic providers update immediately.
+        appLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
+        ) { [weak self] notif in
+            guard let app = notif.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            if app.bundleIdentifier == "com.electron.ollama" || app.localizedName?.localizedCaseInsensitiveContains("ollama") == true {
+                MainActor.assumeIsolated { self?.refreshNow() }
+            }
+        }
+
+        appTerminateObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] notif in
+            guard let app = notif.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            if app.bundleIdentifier == "com.electron.ollama" || app.localizedName?.localizedCaseInsensitiveContains("ollama") == true {
+                MainActor.assumeIsolated { self?.refreshNow() }
+            }
+        }
     }
 
     func stop() {
@@ -176,6 +200,14 @@ final class UsageStore: ObservableObject {
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
             self.wakeObserver = nil
+        }
+        if let appLaunchObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(appLaunchObserver)
+            self.appLaunchObserver = nil
+        }
+        if let appTerminateObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(appTerminateObserver)
+            self.appTerminateObserver = nil
         }
     }
 
@@ -244,9 +276,15 @@ final class UsageStore: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             defer { self.refreshing.remove(providerID) }
-            guard let fresh = await self.snapshot(from: provider, version: version) else { return }
-            if let index = self.snapshots.firstIndex(where: { $0.id == providerID }) {
-                self.snapshots[index] = fresh
+            let fresh = await self.snapshot(from: provider, version: version)
+            if let fresh {
+                if let index = self.snapshots.firstIndex(where: { $0.id == providerID }) {
+                    self.snapshots[index] = fresh
+                } else {
+                    self.snapshots = ProviderOrder.arrange(self.snapshots + [fresh], by: self.order, id: \.id)
+                }
+            } else {
+                self.snapshots.removeAll { $0.id == providerID }
             }
             self.lastAttempt = Date()
             // A beat of visible work even when the answer was instant: a spinner
@@ -369,7 +407,13 @@ final class UsageStore: ObservableObject {
 
     /// A failed fetch never invents a number: it either re-shows the last good
     /// one marked stale, or shows the cell with no reading at all.
-    private func degraded(provider: UsageProvider, error: Error) -> ProviderSnapshot {
+    private func degraded(provider: UsageProvider, error: Error) -> ProviderSnapshot? {
+        if !provider.isVisibleWhenAbsent {
+            lastGood[provider.id] = nil
+            archive.save(lastGood)
+            return nil
+        }
+
         let status = Self.status(for: error)
 
         // Remembered apart from the snapshot on purpose. The snapshot answers

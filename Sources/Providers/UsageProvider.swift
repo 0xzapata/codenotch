@@ -41,6 +41,15 @@ protocol UsageProvider {
     /// and no prompt appears. A requirement, not an extension member, for the
     /// reason spelled out above `account()`.
     func forgetCachedCredential()
+    /// Whether this provider should keep a cell or placeholder in the notch when
+    /// its account or daemon is unavailable. Most providers default to `true`
+    /// so users see sign-in guidance; local daemon providers return `false`
+    /// so an inactive service does not take up a ring in the notch.
+    var isVisibleWhenAbsent: Bool { get }
+}
+
+extension UsageProvider {
+    var isVisibleWhenAbsent: Bool { true }
 }
 
 enum UsageProviderError: Error {
