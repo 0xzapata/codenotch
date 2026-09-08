@@ -1224,3 +1224,75 @@ final class StatusMessageHeightTests: XCTestCase {
         }
     }
 }
+
+/// Choosing a size multiplies the whole surface. What matters is that it is a
+/// multiplication and nothing more: the design frame stays the thing every
+/// constant is quoted from, and `medium` stays that frame untouched.
+@MainActor
+final class NotchSizeTests: XCTestCase {
+    private struct Screen: ScreenDescribing {
+        var frameValue: CGRect
+        var visibleFrameValue: CGRect
+    }
+
+    private func model(scale: CGFloat, edge: NotchEdge = .right,
+                       height: CGFloat = 900) -> NotchViewModel {
+        let model = NotchViewModel()
+        model.edge = edge
+        model.sizeScale = scale
+        model.adopt(screen: Screen(frameValue: CGRect(x: 0, y: 0, width: 1440, height: height),
+                                   visibleFrameValue: CGRect(x: 0, y: 0, width: 1440, height: height)))
+        return model
+    }
+
+    /// The point of the setting, stated as the thing the eye actually judges:
+    /// the notch's own body, at the size it is drawn on screen.
+    ///
+    /// Not the panel — most of that is transparent padding reserved for the
+    /// tooltip, and it is budgeted against a screen that does not grow when the
+    /// notch does, so the panel is not monotonic in the size choice even though
+    /// the notch is.
+    func testTheDrawnNotchGrowsWithTheSizeChoice() {
+        func drawnDepth(_ size: NotchSize) -> CGFloat {
+            let model = model(scale: size.scale)
+            model.isExpanded = true
+            return model.notchDepth * size.scale
+        }
+
+        XCTAssertGreaterThan(drawnDepth(.large), drawnDepth(.medium))
+        XCTAssertGreaterThan(drawnDepth(.medium), drawnDepth(.small))
+    }
+
+    /// The other half of that coupling, pinned so it is a decision rather than
+    /// a surprise: a larger notch is given a *shorter* card, because the screen
+    /// it has to fit on stayed the same size.
+    func testALargerNotchIsGivenAShorterCard() {
+        XCTAssertLessThan(model(scale: 1.25).maxCardHeight(cellCount: 3),
+                          model(scale: 0.8).maxCardHeight(cellCount: 3))
+    }
+
+    /// The trap this feature sets for itself. The tooltip is budgeted against
+    /// the screen, and the screen does not grow when the notch does — so a card
+    /// sized against the raw height would be drawn a quarter taller than it was
+    /// budgeted for, and run off the bottom of a small display.
+    func testALargerNotchGetsASmallerTooltipBudget() {
+        let large = model(scale: 1.25).sessionCap(cellCount: 3)
+        let medium = model(scale: 1).sessionCap(cellCount: 3)
+        let small = model(scale: 0.8).sessionCap(cellCount: 3)
+
+        XCTAssertLessThanOrEqual(large, medium)
+        XCTAssertLessThanOrEqual(medium, small)
+    }
+
+    /// And the card that budget produces, once drawn, still fits the screen it
+    /// was budgeted against — which is the property the cap exists to hold.
+    func testTheDrawnCardStillFitsTheScreenAtEverySize() {
+        for size in NotchSize.allCases {
+            let height: CGFloat = 900
+            let model = model(scale: size.scale, height: height)
+            let drawn = model.maxCardHeight(cellCount: 3) * size.scale
+            XCTAssertLessThanOrEqual(drawn, height,
+                                     "\(size.rawValue) draws a \(drawn)pt card on a \(height)pt screen")
+        }
+    }
+}
