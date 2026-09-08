@@ -181,6 +181,12 @@ final class NotchViewModel: ObservableObject {
         return cornerCentreAlong + NotchLayout.orbCornerOffset(corner: drawnCornerRadius)
     }
 
+    /// Reserve the full hit area even while only the resting arc is visible,
+    /// so revealing the settings button cannot put it beyond the screen.
+    var trailingExtent: CGFloat {
+        max(0, orbAlong - shapeLength + NotchLayout.orbHotZone / 2).rounded(.up)
+    }
+
     /// Where the bar's far corner actually turns, along the stack.
     ///
     /// Inset from the bar's end by the *flare* as well as by the corner's own

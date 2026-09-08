@@ -82,6 +82,33 @@ final class PanelOffsetTests: XCTestCase {
         visibleFrameValue: CGRect(x: 0, y: 0, width: 1800, height: 1132)
     )
 
+    @MainActor
+    func testDraggingToTheTrailingEndKeepsTheSettingsHandleOnScreen() {
+        let secondary = FakeScreen(
+            frameValue: CGRect(x: -1800, y: -200, width: 1800, height: 1169),
+            visibleFrameValue: CGRect(x: -1800, y: -200, width: 1800, height: 1132)
+        )
+        for display in [screen, secondary] {
+            for edge in NotchEdge.allCases {
+                let model = NotchViewModel()
+                model.edge = edge
+                let frame = NotchGeometry.panelFrame(
+                    for: display, panelSize: model.panelSize, edge: edge,
+                    alongOffset: 10_000, slack: model.slack,
+                    trailingExtent: model.trailingExtent
+                )
+                let handleEnd = model.slack + model.orbAlong + NotchLayout.orbHotZone / 2
+                if edge.isVertical {
+                    XCTAssertGreaterThanOrEqual(frame.maxY - handleEnd,
+                                                display.frameValue.minY - 0.5)
+                } else {
+                    XCTAssertLessThanOrEqual(frame.minX + handleEnd,
+                                             display.frameValue.maxX + 0.5)
+                }
+            }
+        }
+    }
+
     func testZeroOffsetChangesNothing() {
         let size = CGSize(width: 334, height: 484)
         let centred = NotchGeometry.panelFrame(for: screen, panelSize: size, edge: .right)
