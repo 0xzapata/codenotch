@@ -1284,15 +1284,31 @@ final class NotchSizeTests: XCTestCase {
         XCTAssertLessThanOrEqual(medium, small)
     }
 
-    /// And the card that budget produces, once drawn, still fits the screen it
-    /// was budgeted against — which is the property the cap exists to hold.
-    func testTheDrawnCardStillFitsTheScreenAtEverySize() {
+    /// And the card that budget produces still fits the screen it was budgeted
+    /// against — which is the property the cap exists to hold.
+    func testTheCardStillFitsTheScreenAtEverySize() {
         for size in NotchSize.allCases {
             let height: CGFloat = 900
-            let model = model(scale: size.scale, height: height)
-            let drawn = model.maxCardHeight(cellCount: 3) * size.scale
-            XCTAssertLessThanOrEqual(drawn, height,
-                                     "\(size.rawValue) draws a \(drawn)pt card on a \(height)pt screen")
+            let card = model(scale: size.scale, height: height).maxCardHeight(cellCount: 3)
+            XCTAssertLessThanOrEqual(card, height,
+                                     "\(size.rawValue) gives a \(card)pt card on a \(height)pt screen")
         }
+    }
+
+    /// The point of this whole split: the tooltip is drawn at one size whatever
+    /// the notch is set to. Its text has a legible size of its own, and
+    /// shrinking the reading you opened the notch to read is the opposite of
+    /// the point.
+    ///
+    /// Read off the panel, because that is where a scaled card would show: the
+    /// panel's depth is the drawn notch plus the card's own room, so the whole
+    /// difference between two sizes has to be the notch's share alone.
+    func testTheTooltipKeepsItsOwnSizeWhateverTheNotchIs() {
+        let large = model(scale: 1.25)
+        let medium = model(scale: 1)
+        let notchShare = medium.contentInset + NotchLayout.bodyDepth(for: .right)
+
+        XCTAssertEqual(large.panelSize(cellCount: 3).width - medium.panelSize(cellCount: 3).width,
+                       notchShare * 0.25, accuracy: 0.001)
     }
 }

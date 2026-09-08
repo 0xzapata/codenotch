@@ -148,17 +148,10 @@ final class NotchWindowController {
     func relocate(cellCount: Int? = nil) {
         guard let screen = currentScreen() else { return }
         model.adopt(screen: screen)
-        // One of the two places the size choice reaches the screen — the panel
-        // has to be the drawn size, not the design-frame size. The offset and
-        // the slack are scaled with it because both are distances along the
-        // same edge: leaving them unscaled would clamp a large notch as though
-        // it were a medium one, and the drag would stop short of the corner.
-        let scale = model.sizeScale
         let size = model.panelSize(cellCount: cellCount ?? model.snapshots.count)
-            .multiplied(by: scale)
         let frame = NotchGeometry.panelFrame(
             for: screen, panelSize: size, edge: model.edge,
-            alongOffset: model.alongOffset, slack: model.slack * scale
+            alongOffset: model.alongOffset, slack: model.slack
         )
         lastVisibleFrame = screen.visibleFrame
 
@@ -228,14 +221,8 @@ final class NotchWindowController {
 
     /// The panel's real size, which AppKit may have rounded up from the one we
     /// asked for — and which the flush edge depends on.
-    /// Taken back to design-frame space, so every rect below can be written in
-    /// the same units as the `NotchLayout` constants it is built from. The one
-    /// multiplication back into screen points happens in
-    /// `updateInteractiveRects`.
     private var placement: NotchPlacement {
-        NotchPlacement(edge: model.edge,
-                       panelSize: panel?.frame.size ?? model.panelSize.multiplied(by: model.sizeScale))
-            .unscaled(by: model.sizeScale)
+        NotchPlacement(edge: model.edge, panelSize: panel?.frame.size ?? model.panelSize)
     }
 
     /// The notch itself, in panel coordinates with a top-left origin.
@@ -243,8 +230,8 @@ final class NotchWindowController {
         placement.rect(
             along: model.slack,
             across: 0,
-            length: model.shapeLength,
-            depth: model.notchDepth
+            length: model.shapeLength * model.sizeScale,
+            depth: model.notchDepth * model.sizeScale
         )
     }
 
@@ -255,12 +242,12 @@ final class NotchWindowController {
         // Whatever the resting shape is — the pill, or the display's own notch
         // when it is joining one — the region that wakes it is that plus a
         // generous band, because both are small targets on a screen edge.
-        let length = max(model.restingLength, NotchLayout.pillHotZone)
+        let length = max(model.restingLength * model.sizeScale, NotchLayout.pillHotZone)
         return placement.rect(
-            along: model.slack + (model.shapeLength - length) / 2,
+            along: model.slack + (model.shapeLength * model.sizeScale - length) / 2,
             across: 0,
             length: length,
-            depth: model.restingDepth + NotchLayout.pillHotZone
+            depth: model.restingDepth * model.sizeScale + NotchLayout.pillHotZone
         )
     }
 
@@ -270,7 +257,8 @@ final class NotchWindowController {
     private var handleRect: CGRect {
         let side = NotchLayout.orbHotZone
         let boxes = model.orbHandlePoints.map { point -> CGRect in
-            let centre = placement.point(along: model.slack + point.x, across: point.y)
+            let centre = placement.point(along: model.slack + point.x * model.sizeScale,
+                                         across: point.y * model.sizeScale)
             return CGRect(x: centre.x - side / 2, y: centre.y - side / 2,
                           width: side, height: side)
         }
@@ -280,8 +268,13 @@ final class NotchWindowController {
     /// Whether the pointer is on the handle itself rather than merely inside
     /// the box that contains it.
     private func isOverHandle(_ local: CGPoint) -> Bool {
-        model.isOnOrbHandle(along: placement.along(of: local) - model.slack,
-                            across: placement.across(of: local))
+        // Back into the notch's own measurements, which is what `isOnOrbHandle`
+        // is written in — the orb scales with the notch, so its hit test has to
+        // be asked in the same space the shape was drawn in.
+        model.isOnOrbHandle(
+            along: (placement.along(of: local) - model.slack) / model.sizeScale,
+            across: placement.across(of: local) / model.sizeScale
+        )
     }
 
     /// The only region that takes the mouse. Everything else in the panel is a
@@ -309,10 +302,12 @@ final class NotchWindowController {
         // pointer has to cross. Along it, the card's own extent.
         let cardAcross = model.edge.isVertical ? NotchLayout.cardWidth : cardHeight
         let cardAlong = model.edge.isVertical ? cardHeight : NotchLayout.cardWidth
-        let centre = model.slack + model.ringCenter(index: index)
+        let centre = model.slack + model.ringCenter(index: index) * model.sizeScale
         return placement.rect(
             along: centre - cardAlong / 2,
-            across: model.contentInset + NotchLayout.bodyDepth(for: model.edge),
+            // The card's own extent does not scale, and it begins where the
+            // drawn notch ends.
+            across: model.notchDrawnDepth,
             length: cardAlong,
             depth: NotchLayout.tailGap + NotchLayout.tailLength + cardAcross
         )
@@ -323,11 +318,6 @@ final class NotchWindowController {
         if model.isExpanded, let index = model.hoveredIndex, let card = tooltipRect(index: index) {
             rects.append(card)
         }
-        // Back into screen points. These regions are what the pointer is
-        // actually tested against, so a scale applied to the drawing and not to
-        // these would leave a large notch with a medium notch's hit area —
-        // visibly there, and unreachable at its edges.
-        rects = rects.map { $0.multiplied(by: model.sizeScale) }
         hostingView?.interactiveRects = rects
         if let panel {
             panel.ignoresMouseEvents = !rects.contains { $0.contains(localCursor(in: panel.frame)) }
@@ -760,10 +750,13 @@ final class NotchWindowController {
         updateInteractiveRects()
     }
 
+    /// `along` arrives in panel points, so the cells it is compared against
+    /// have to be where they are drawn rather than where they are measured —
+    /// pitch included, or a large notch would match the wrong ring at the ends.
     private func cellIndex(along: CGFloat) -> Int? {
-        let pitch = NotchLayout.cellPitch(for: model.edge)
+        let pitch = NotchLayout.cellPitch(for: model.edge) * model.sizeScale
         for index in model.snapshots.indices {
-            let centre = model.slack + model.ringCenter(index: index)
+            let centre = model.slack + model.ringCenter(index: index) * model.sizeScale
             if abs(along - centre) <= pitch / 2 { return index }
         }
         return nil

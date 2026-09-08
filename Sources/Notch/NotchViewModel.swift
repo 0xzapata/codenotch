@@ -261,7 +261,17 @@ final class NotchViewModel: ObservableObject {
     /// Where the tooltip's tail tip sits, measured in from the bezel: just off
     /// the inner face of a shape that the extension has made deeper.
     var tooltipInset: CGFloat {
-        contentInset + NotchLayout.bodyDepth(for: edge) + NotchLayout.tailGap
+        notchDrawnDepth + NotchLayout.tailGap
+    }
+
+    /// How deep the notch body reaches on screen — the design-frame depth at
+    /// the size it is actually drawn.
+    ///
+    /// Where the notch ends is where the tooltip begins, and the tooltip is not
+    /// drawn at that size, so this is the seam between the two spaces rather
+    /// than a measurement either of them owns.
+    var notchDrawnDepth: CGFloat {
+        (contentInset + NotchLayout.bodyDepth(for: edge)) * sizeScale
     }
 
     /// The straight part of the shape, flares excluded.
@@ -299,7 +309,9 @@ final class NotchViewModel: ObservableObject {
     var slack: CGFloat { slack(cellCount: snapshots.count) }
 
     func slack(cellCount: Int) -> CGFloat {
-        NotchLayout.slack(for: edge, maxCardHeight: maxCardHeight(cellCount: cellCount))
+        NotchLayout.slack(for: edge,
+                          maxCardHeight: maxCardHeight(cellCount: cellCount),
+                          notchScale: sizeScale)
     }
 
     /// How many sessions a tooltip may list here before it has to summarise
@@ -388,15 +400,24 @@ final class NotchViewModel: ObservableObject {
             + 2 * endSpread(cellCount: cellCount)
     }
 
+    /// The panel as it lands on screen, size choice included.
+    ///
+    /// Two spaces, added rather than multiplied together: the notch is drawn at
+    /// `sizeScale`, and the tooltip is drawn at one size whatever the notch is
+    /// set to — its text has a legible size of its own, and shrinking the
+    /// reading you opened the notch to read is the opposite of the point.
+    ///
+    /// So the notch's share scales and the card's share does not. Scaling the
+    /// whole panel instead left the card cropped at the small end, where the
+    /// panel had shrunk around a card that had not.
     func panelSize(cellCount: Int) -> CGSize {
         let card = maxCardHeight(cellCount: cellCount)
         return NotchPlacement.panelSize(
             edge: edge,
-            length: shapeLength(cellCount: cellCount)
-                + 2 * NotchLayout.slack(for: edge, maxCardHeight: card),
-            depth: contentInset
+            length: shapeLength(cellCount: cellCount) * sizeScale
+                + 2 * NotchLayout.slack(for: edge, maxCardHeight: card, notchScale: sizeScale),
+            depth: (contentInset + NotchLayout.bodyDepth(for: edge)) * sizeScale
                 + NotchLayout.tooltipDepth(for: edge, maxCardHeight: card)
-                + NotchLayout.bodyDepth(for: edge)
         )
     }
 }

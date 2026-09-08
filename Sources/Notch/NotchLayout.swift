@@ -325,11 +325,17 @@ enum NotchLayout {
     ///
     /// Which dimension crosses the ends is what differs: the card's height
     /// along a vertical edge, its width along a horizontal one.
+    /// `notchScale` applies to the notch's own margin and to nothing else. The
+    /// card half that this takes the maximum of is the card's real size on
+    /// screen, and the card is drawn at one size whatever the notch is set to —
+    /// scaling both halves would reserve room for a card that is never that
+    /// big, and at the small end would reserve less than the card needs.
     static func slack(for edge: NotchEdge,
-                      maxCardHeight: CGFloat = defaultMaxCardHeight) -> CGFloat {
+                      maxCardHeight: CGFloat = defaultMaxCardHeight,
+                      notchScale: CGFloat = 1) -> CGFloat {
         edge.isVertical
-            ? max(endSlack, maxCardHeight / 2 + cardCorner)
-            : max(endSlack, cardWidth / 2 + cardCorner)
+            ? max(endSlack * notchScale, maxCardHeight / 2 + cardCorner)
+            : max(endSlack * notchScale, cardWidth / 2 + cardCorner)
     }
 
     private static let endSlack = Design.px(190)
