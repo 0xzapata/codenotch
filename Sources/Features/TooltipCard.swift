@@ -79,6 +79,8 @@ private struct TooltipShell<Content: View>: View {
     let direction: NotchEdge.TooltipDirection
     @ViewBuilder let content: Content
 
+    @Environment(\.codenotchReduceTransparency) private var reduceTransparency
+
     private var card: some View {
         // The same arrangement that makes the notch fold work: the contents
         // are laid out once at their natural size and never move, and it is
@@ -102,6 +104,12 @@ private struct TooltipShell<Content: View>: View {
         .clipShape(
             RoundedRectangle(cornerRadius: NotchLayout.cardCorner, style: .circular)
         )
+        .overlay {
+            if reduceTransparency {
+                RoundedRectangle(cornerRadius: NotchLayout.cardCorner, style: .circular)
+                    .strokeBorder(Palette.ringTrack, lineWidth: 1)
+            }
+        }
     }
 
     private var tail: some View {
