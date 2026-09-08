@@ -48,6 +48,11 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(notchEdge.rawValue, forKey: Keys.edge) }
     }
 
+    /// How large the notch is drawn.
+    @Published var notchSize: NotchSize {
+        didSet { defaults.set(notchSize.rawValue, forKey: Keys.size) }
+    }
+
     /// The display the notch stays on, or the original focus-following behaviour.
     ///
     /// Only meaningful in `NotchScreenScope.main` — pinning a display and
@@ -184,6 +189,8 @@ final class Preferences: ObservableObject {
         static let visibility = "notchVisibility"
         static let presence = "appPresence"
         static let edge = "notchEdge"
+        // A new key, so there is nothing under the old app name to migrate.
+        static let size = "notchSize"
         static let display = "notchDisplay"
         static let resetTimeFormat = "resetTimeFormat"
         static let scope = "notchScope"
@@ -265,6 +272,10 @@ final class Preferences: ObservableObject {
         // side of a Mac that no system chrome claims by default.
         self.notchEdge = defaults.string(forKey: Keys.edge)
             .flatMap(NotchEdge.init(rawValue:)) ?? .right
+        // Medium is the design frame at 1:1, so an install that predates this
+        // choice keeps exactly the notch it already had.
+        self.notchSize = defaults.string(forKey: Keys.size)
+            .flatMap(NotchSize.init(rawValue:)) ?? .medium
         self.displayPreference = defaults.string(forKey: Keys.display)
             .map(DisplayPreference.display) ?? .followActiveWindow
         self.resetTimeFormat = defaults.string(forKey: Keys.resetTimeFormat)

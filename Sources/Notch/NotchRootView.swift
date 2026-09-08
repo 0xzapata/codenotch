@@ -9,7 +9,13 @@ struct NotchRootView: View {
         // AppKit settled on, and the notch has to sit flush against *that*
         // edge, not against the size we asked for.
         GeometryReader { proxy in
-            let place = NotchPlacement(edge: model.edge, panelSize: proxy.size)
+            // Everything below is laid out at the size the design frame was
+            // drawn at, and scaled once on the way out. Laying out at the real
+            // panel size instead would mean every `NotchLayout` constant
+            // needing a multiplication of its own — forty chances to miss one,
+            // and no way left to check any of them against the frame.
+            let canvas = proxy.size.multiplied(by: 1 / model.sizeScale)
+            let place = NotchPlacement(edge: model.edge, panelSize: canvas)
 
             ZStack(alignment: .topLeading) {
                 Color.clear
@@ -68,9 +74,13 @@ struct NotchRootView: View {
                         )))
                 }
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            .frame(width: canvas.width, height: canvas.height)
             // Swapping cards is a movement like any other here.
             .animation(motion(NotchMotion.glide), value: model.hoveredIndex)
+            // Anchored top-leading because the canvas is the panel divided by
+            // the scale: multiplying it back from that corner lands it on the
+            // panel exactly, whichever edge the notch is welded to.
+            .scaleEffect(model.sizeScale, anchor: .topLeading)
         }
         .animation(motion(NotchMotion.unfold), value: model.isExpanded)
         .tint(model.accentColor.color)

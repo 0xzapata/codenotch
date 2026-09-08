@@ -148,10 +148,17 @@ final class NotchWindowController {
     func relocate(cellCount: Int? = nil) {
         guard let screen = currentScreen() else { return }
         model.adopt(screen: screen)
+        // One of the two places the size choice reaches the screen — the panel
+        // has to be the drawn size, not the design-frame size. The offset and
+        // the slack are scaled with it because both are distances along the
+        // same edge: leaving them unscaled would clamp a large notch as though
+        // it were a medium one, and the drag would stop short of the corner.
+        let scale = model.sizeScale
         let size = model.panelSize(cellCount: cellCount ?? model.snapshots.count)
+            .multiplied(by: scale)
         let frame = NotchGeometry.panelFrame(
             for: screen, panelSize: size, edge: model.edge,
-            alongOffset: model.alongOffset, slack: model.slack
+            alongOffset: model.alongOffset, slack: model.slack * scale
         )
         lastVisibleFrame = screen.visibleFrame
 
@@ -221,8 +228,14 @@ final class NotchWindowController {
 
     /// The panel's real size, which AppKit may have rounded up from the one we
     /// asked for — and which the flush edge depends on.
+    /// Taken back to design-frame space, so every rect below can be written in
+    /// the same units as the `NotchLayout` constants it is built from. The one
+    /// multiplication back into screen points happens in
+    /// `updateInteractiveRects`.
     private var placement: NotchPlacement {
-        NotchPlacement(edge: model.edge, panelSize: panel?.frame.size ?? model.panelSize)
+        NotchPlacement(edge: model.edge,
+                       panelSize: panel?.frame.size ?? model.panelSize.multiplied(by: model.sizeScale))
+            .unscaled(by: model.sizeScale)
     }
 
     /// The notch itself, in panel coordinates with a top-left origin.
@@ -310,6 +323,11 @@ final class NotchWindowController {
         if model.isExpanded, let index = model.hoveredIndex, let card = tooltipRect(index: index) {
             rects.append(card)
         }
+        // Back into screen points. These regions are what the pointer is
+        // actually tested against, so a scale applied to the drawing and not to
+        // these would leave a large notch with a medium notch's hit area —
+        // visibly there, and unreachable at its edges.
+        rects = rects.map { $0.multiplied(by: model.sizeScale) }
         hostingView?.interactiveRects = rects
         if let panel {
             panel.ignoresMouseEvents = !rects.contains { $0.contains(localCursor(in: panel.frame)) }
@@ -533,6 +551,19 @@ final class NotchWindowController {
     /// animation can smooth over, and animating a panel across a corner looks
     /// like a bug rather than a choice — hence the crossing rather than a
     /// slide.
+    /// A new size choice: set it, then rebuild the panel around it.
+    ///
+    /// Set-then-relocate rather than a subscription on `model.$sizeScale`,
+    /// because `@Published` fires in `willSet` — a sink here would recompute
+    /// the panel from the size that is being replaced. `apply(edge:)` is the
+    /// same shape for the same reason.
+    func apply(size: NotchSize) {
+        guard model.sizeScale != size.scale else { return }
+        model.sizeScale = size.scale
+        relocate()
+        updateInteractiveRects()
+    }
+
     func apply(edge: NotchEdge) {
         guard model.edge != edge else { return }
         guard let panel else {   // before there is anything on screen to fade

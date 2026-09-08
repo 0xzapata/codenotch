@@ -55,6 +55,16 @@ final class NotchViewModel: ObservableObject {
     /// the new edge whenever `edge` changes; this type does not own that
     /// persistence, only the live value.
     @Published var alongOffset: CGFloat = 0
+    /// What every measured distance is multiplied by before it reaches the
+    /// screen — the Appearance size choice, as a number.
+    ///
+    /// Everything in this type stays in **unscaled** points, the size the
+    /// design frame is drawn at, and so does `NotchLayout`. Scaling at the
+    /// source would mean threading a factor through forty constants and
+    /// leaving each one no longer comparable to the frame it is quoted from.
+    /// The multiplication happens once, at the two places that touch the
+    /// screen: the panel's frame and the drawn content.
+    @Published var sizeScale: CGFloat = 1
     /// Mirrors the persisted Appearance choice so the separate notch window
     /// redraws immediately when Settings changes it.
     @Published var accentColor: AccentColorChoice = .system
@@ -313,13 +323,18 @@ final class NotchViewModel: ObservableObject {
     /// stack, half of it past each end, so the stack itself takes its share
     /// first. Along a horizontal edge the card hangs *inward* instead, and what
     /// it competes with is the depth already spent on the notch body and tail.
+    /// The screen is measured in real points, and everything it is compared
+    /// against here is unscaled. Dividing brings the screen into the same space
+    /// rather than scaling the four constants below it: at `large` a card sized
+    /// against the raw height would be drawn a quarter taller than it was
+    /// budgeted for, and run off the bottom of a small display.
     private func cardBudget(cellCount: Int) -> CGFloat {
         if edge.isVertical {
-            return screenSize.height
+            return screenSize.height / sizeScale
                 - shapeLength(cellCount: cellCount)
                 - 2 * NotchLayout.cardCorner
         }
-        return screenUsableSize.height
+        return screenUsableSize.height / sizeScale
             - contentInset
             - NotchLayout.bodyDepth(for: edge)
             - NotchLayout.tailLength

@@ -70,9 +70,40 @@ struct NotchPlacement {
         }
     }
 
+    /// Undo a scale, to get back to the space `NotchLayout` measures in.
+    ///
+    /// The panel is built at the drawn size; every offset inside it is a
+    /// design-frame distance. Dividing once here is what lets the hit regions
+    /// keep being written in the same units as the layout they follow.
+    func unscaled(by scale: CGFloat) -> NotchPlacement {
+        NotchPlacement(edge: edge, panelSize: panelSize.multiplied(by: 1 / scale))
+    }
+
     /// The panel's extent along the stack, whichever axis that is.
     var panelLength: CGFloat { edge.isVertical ? panelSize.height : panelSize.width }
 
     /// And across it.
     var panelDepth: CGFloat { edge.isVertical ? panelSize.width : panelSize.height }
+}
+
+/// Multiplying a measurement by the Appearance size choice.
+///
+/// Written once, here, because the notch scales in exactly three places — the
+/// panel's frame, the drawn content, and the hit regions between them. Three
+/// call sites spelling out the same pair of multiplications would be three
+/// chances to scale one axis and forget the other.
+extension CGSize {
+    func multiplied(by scale: CGFloat) -> CGSize {
+        CGSize(width: width * scale, height: height * scale)
+    }
+}
+
+extension CGRect {
+    /// The origin scales too. A hit region is a position as much as a size, and
+    /// leaving the origin alone would leave every rect anchored where the
+    /// medium notch used to be.
+    func multiplied(by scale: CGFloat) -> CGRect {
+        CGRect(x: minX * scale, y: minY * scale,
+               width: width * scale, height: height * scale)
+    }
 }
