@@ -80,4 +80,20 @@ enum KeychainItem {
     static func modifiedAt(service: String, account: String? = nil) -> Date? {
         newest(service: service, account: account)?.modifiedAt
     }
+
+    /// The newest item across several services — the same "newest wins" choice
+    /// as `newest(service:)`, widened to a profile whose token may be filed
+    /// under more than one service name (see `ClaudeProfile.keychainServices`).
+    /// Enumerating each service's attributes never raises a prompt, so trying
+    /// two costs no extra dialogue over trying one.
+    static func newest(services: [String], account: String? = nil) -> Match? {
+        services
+            .compactMap { newest(service: $0, account: account) }
+            .max { ($0.modifiedAt ?? .distantPast) < ($1.modifiedAt ?? .distantPast) }
+    }
+
+    /// When the owning app last wrote the newest item across these services.
+    static func modifiedAt(services: [String], account: String? = nil) -> Date? {
+        newest(services: services, account: account)?.modifiedAt
+    }
 }
