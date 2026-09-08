@@ -8,7 +8,7 @@ enum CodexCredentials {
     }
 
     static var authURL: URL {
-        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/auth.json")
+        CodexProfile.default().authURL
     }
 
     static func load(from url: URL = authURL, now: Date = Date()) throws -> Credential {
@@ -32,7 +32,7 @@ enum CodexCredentials {
         return Credential(accessToken: auth.tokens.access_token, accountID: auth.tokens.account_id)
     }
 
-    static func account(from url: URL = authURL) -> ProviderAccount? {
+    static func account(from url: URL = authURL, source: String = "Codex") -> ProviderAccount? {
         guard let data = try? Data(contentsOf: url),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tokens = root["tokens"] as? [String: Any],
@@ -44,7 +44,7 @@ enum CodexCredentials {
         return ProviderAccount(
             label: claims["email"] as? String,
             plan: auth?["chatgpt_plan_type"] as? String,
-            source: "Codex",
+            source: source,
             manageURL: URL(string: "https://chatgpt.com/#settings/Account")
         )
     }
