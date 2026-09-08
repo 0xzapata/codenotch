@@ -227,11 +227,17 @@ struct SettingsView: View {
         // The glass is what gives the card an edge and a lift of its own, so
         // there is no border drawn on top of it.
         .background {
-            Color.clear.glassEffect(
-                .regular,
-                in: RoundedRectangle(cornerRadius: SettingsView.sidebarCornerRadius,
-                                     style: .continuous)
-            )
+            if #available(macOS 26.0, *) {
+                Color.clear.glassEffect(
+                    .regular,
+                    in: RoundedRectangle(cornerRadius: SettingsView.sidebarCornerRadius,
+                                         style: .continuous)
+                )
+            } else {
+                RoundedRectangle(cornerRadius: SettingsView.sidebarCornerRadius,
+                                 style: .continuous)
+                    .fill(.regularMaterial)
+            }
         }
         .padding(SettingsView.sidebarInset)
     }
@@ -262,7 +268,13 @@ struct SettingsView: View {
                 .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(.primary)
                 .frame(width: 36, height: 36)
-                .background { Color.clear.glassEffect(.regular, in: Circle()) }
+                .background {
+                    if #available(macOS 26.0, *) {
+                        Color.clear.glassEffect(.regular, in: Circle())
+                    } else {
+                        Circle().fill(.regularMaterial)
+                    }
+                }
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

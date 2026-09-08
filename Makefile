@@ -10,7 +10,8 @@ endif
 
 PROJECT := Codenotch.xcodeproj
 SCHEME  := Codenotch
-DEST    := platform=macOS,arch=arm64
+ARCH    ?= $(shell uname -m)
+DEST    ?= platform=macOS,arch=$(ARCH)
 
 # Debug signs itself when the maintainer's Developer ID certificate isn't in
 # the keychain, which is every machine but the maintainer's — so a contributor
