@@ -623,6 +623,7 @@ final class FirstRunCopyTests: XCTestCase {
                             signOut: { _ in }, signIn: { _ in true },
                             switchAccount: { _ in true },
                             retry: { _ in },
+                            resetPosition: {},
                             updater: Updater())
     }
 
