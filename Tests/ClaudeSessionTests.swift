@@ -92,3 +92,163 @@ final class ClaudeSessionRecordTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(r.startedAt).timeIntervalSince1970, 1787894126.697, accuracy: 0.01)
     }
 }
+
+/// Which source gets to say what a session is doing.
+///
+/// Claude Code fills `status` in from its terminal interface, so a terminal
+/// session's record answers for itself and a desktop session's never does. The
+/// split has to hold in both directions: the desktop case is the bug being
+/// fixed, and the terminal case is the behaviour that must not change —
+/// `waiting` in particular, which nothing but the terminal interface can know.
+@MainActor
+final class ClaudeSessionStateSourceTests: XCTestCase {
+    private var projects: URL!
+
+    override func setUpWithError() throws {
+        projects = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sessions-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: projects)
+    }
+
+    private func record(_ json: String) throws -> ClaudeSessionRecord {
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        return try XCTUnwrap(ClaudeSessionRecord(json: object))
+    }
+
+    private func writeTranscript(_ body: String, session: String, cwd: String) throws {
+        let directory = projects
+            .appendingPathComponent(ClaudeTranscript.projectSlug(forCWD: cwd))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(body.utf8).write(to: directory.appendingPathComponent("\(session).jsonl"))
+    }
+
+    private var reader: ClaudeTranscriptReader { ClaudeTranscriptReader(projects: projects) }
+
+    /// The real shape of a desktop session's file, trimmed. No status, no
+    /// tempo, no `statusUpdatedAt` — and the file is written once, when the
+    /// session starts, so its own timestamp says nothing either.
+    private let desktop = """
+    { "pid": 26440, "sessionId": "0b24b489", "cwd": "/Users/vinz/app",
+      "startedAt": 1788731755247, "procStart": "Sun Sep  6 21:55:54 2026",
+      "kind": "interactive", "entrypoint": "claude-desktop", "name": "app-6c",
+      "messagingSocketPath": "/tmp/cc-socks/26440.sock" }
+    """
+
+    func testADesktopRecordAdmitsItSaysNothingAboutState() throws {
+        let desktop = try record(desktop)
+        XCTAssertFalse(desktop.reportsStatus)
+        XCTAssertEqual(desktop.sessionID, "0b24b489")
+        XCTAssertEqual(desktop.cwd, "/Users/vinz/app")
+        XCTAssertEqual(desktop.session.detail, "Desktop · app")
+
+        let terminal = try record(#"{ "pid": 1, "cwd": "/tmp/x", "status": "busy" }"#)
+        XCTAssertTrue(terminal.reportsStatus)
+    }
+
+    /// A word neither of us knows is worth no more than no word at all, so it
+    /// goes to the transcript too.
+    func testAnUnrecognisedStatusIsNotAnAnswer() throws {
+        XCTAssertFalse(try record(#"{ "pid": 1, "cwd": "/tmp/x", "status": "hibernating" }"#)
+            .reportsStatus)
+        XCTAssertTrue(try record(#"{ "pid": 1, "cwd": "/tmp/x", "status": "idle" }"#)
+            .reportsStatus)
+    }
+
+    func testADesktopSessionTakesItsStateFromTheTranscript() throws {
+        try writeTranscript(#"{"type":"assistant","message":{"stop_reason":"tool_use"}}"#,
+                            session: "0b24b489", cwd: "/Users/vinz/app")
+        let session = ClaudeSessionMonitor.state(of: try record(desktop), transcripts: reader)
+        XCTAssertEqual(session.state, .busy)
+        XCTAssertEqual(session.id, "claude.26440")
+    }
+
+    func testADesktopSessionThatFinishedItsTurnIsIdle() throws {
+        try writeTranscript(#"{"type":"assistant","message":{"stop_reason":"end_turn"}}"#,
+                            session: "0b24b489", cwd: "/Users/vinz/app")
+        XCTAssertEqual(
+            ClaudeSessionMonitor.state(of: try record(desktop), transcripts: reader).state, .idle
+        )
+    }
+
+    /// With no transcript to read, the record's own answer stands — which is
+    /// exactly what the notch did before any of this existed.
+    func testWithNoTranscriptTheRecordStands() throws {
+        XCTAssertEqual(
+            ClaudeSessionMonitor.state(of: try record(desktop), transcripts: reader).state, .idle
+        )
+        XCTAssertEqual(
+            ClaudeSessionMonitor.state(of: try record(desktop), transcripts: nil).state, .idle
+        )
+    }
+
+    /// The behaviour that must not regress: a terminal session says `waiting`,
+    /// and the transcript — which cannot see a permission prompt at all — is
+    /// never allowed to talk it out of that.
+    func testATerminalSessionKeepsItsOwnStateAndItsWaitingFor() throws {
+        let waiting = try record("""
+        { "pid": 7, "sessionId": "0b24b489", "cwd": "/Users/vinz/app",
+          "status": "waiting", "waitingFor": "permission" }
+        """)
+        try writeTranscript(#"{"type":"assistant","message":{"stop_reason":"tool_use"}}"#,
+                            session: "0b24b489", cwd: "/Users/vinz/app")
+        let session = ClaudeSessionMonitor.state(of: waiting, transcripts: reader)
+        XCTAssertEqual(session.state, .waiting)
+        XCTAssertEqual(session.waitingFor, "permission")
+    }
+
+    // MARK: - Deduplication
+
+    /// Resuming after a crash registers a new pid while the old process is
+    /// still winding down, and for a moment both files are live. One session
+    /// must not be drawn twice.
+    func testTheSameSessionUnderTwoPidsIsDrawnOnce() throws {
+        let old = try record("""
+        { "pid": 1, "sessionId": "same", "cwd": "/tmp/x", "startedAt": 1000000 }
+        """)
+        let new = try record("""
+        { "pid": 2, "sessionId": "same", "cwd": "/tmp/x", "startedAt": 2000000 }
+        """)
+        for pair in [[old, new], [new, old]] {
+            let kept = ClaudeSessionMonitor.deduplicated(pair)
+            XCTAssertEqual(kept.count, 1)
+            XCTAssertEqual(kept.first?.pid, 2, "the most recently started record wins")
+        }
+    }
+
+    func testDifferentSessionsAreAllKept() throws {
+        let a = try record(#"{ "pid": 1, "sessionId": "a", "cwd": "/tmp/x" }"#)
+        let b = try record(#"{ "pid": 2, "sessionId": "b", "cwd": "/tmp/x" }"#)
+        XCTAssertEqual(ClaudeSessionMonitor.deduplicated([a, b]).count, 2)
+    }
+
+    /// A record old enough to have no session id cannot be matched against
+    /// anything, so it is kept rather than dropped or merged.
+    func testRecordsWithoutASessionIdAreKept() throws {
+        let a = try record(#"{ "pid": 1, "cwd": "/tmp/x" }"#)
+        let b = try record(#"{ "pid": 2, "cwd": "/tmp/x" }"#)
+        XCTAssertEqual(ClaudeSessionMonitor.deduplicated([a, b]).count, 2)
+    }
+}
+
+/// A record with nothing to date itself by must still answer the same thing
+/// twice. It used to answer `Date()`, so every rescan produced a session that
+/// compared unequal to the one before it and the notch re-animated at 2 Hz.
+extension ClaudeSessionRecordTests {
+    func testARecordWithNoTimestampHoldsStill() throws {
+        let json = """
+        { "pid": 1, "sessionId": "a", "cwd": "/tmp/x", "startedAt": 1788731755247,
+          "entrypoint": "claude-desktop" }
+        """
+        let first = try XCTUnwrap(session(json))
+        let second = try XCTUnwrap(session(json))
+        XCTAssertEqual(first.since, second.since)
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.since.timeIntervalSince1970, 1788731755.247, accuracy: 0.01)
+    }
+}

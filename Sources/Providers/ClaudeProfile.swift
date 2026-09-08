@@ -117,6 +117,11 @@ struct ClaudeProfile: Equatable, Hashable {
     /// Where Claude Code writes one file per running process.
     var sessionsDirectory: URL { configDirectory.appendingPathComponent("sessions") }
 
+    /// Where it writes each session's transcript, one directory per working
+    /// directory. The registry says which sessions exist; this says what they
+    /// are doing — see `ClaudeTranscript`.
+    var projectsDirectory: URL { configDirectory.appendingPathComponent("projects") }
+
     /// The keychain service the OAuth token is filed under.
     ///
     /// The default directory uses the bare name. Any other `CLAUDE_CONFIG_DIR`

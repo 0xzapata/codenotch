@@ -9,6 +9,18 @@ struct ClaudeSessionRecord {
     let pid: Int32
     /// Roughly when the process started. Only used to notice a recycled pid.
     let startedAt: Date?
+    /// The session's own id, which is what names its transcript.
+    let sessionID: String?
+    /// Where it is running. The transcript is filed under this.
+    let cwd: String
+    /// Whether the record said anything the monitor understands about what the
+    /// session is doing.
+    ///
+    /// False for every session the Claude desktop app hosts: Claude Code fills
+    /// `status` in from its terminal interface, which a desktop session does
+    /// not have. That is the flag that sends the monitor to the transcript
+    /// instead — see `ClaudeTranscript`.
+    let reportsStatus: Bool
     let session: AgentSession
 
     /// Decoded leniently on purpose: the file is written by another program on
@@ -21,16 +33,24 @@ struct ClaudeSessionRecord {
         let raw = json["status"] as? String
         let tempo = json["tempo"] as? String        // the normalised form, when present
         let state: AgentSession.State
+        // `reportsStatus` is about whether the record *said* something, not
+        // about what it said: a word neither of us knows is no more use than no
+        // word at all, and both are better answered by the transcript.
+        let reportsStatus: Bool
         switch (tempo, raw) {
-        case ("blocked", _), (_, "waiting"): state = .waiting
-        case ("active", _), (_, "busy"):     state = .busy
-        default:                             state = .idle
+        case ("blocked", _), (_, "waiting"): (state, reportsStatus) = (.waiting, true)
+        case ("active", _), (_, "busy"):     (state, reportsStatus) = (.busy, true)
+        case ("idle", _), (_, "idle"):       (state, reportsStatus) = (.idle, true)
+        default:                             (state, reportsStatus) = (.idle, false)
         }
 
         let millis = (json["statusUpdatedAt"] as? NSNumber)?.doubleValue
             ?? (json["updatedAt"] as? NSNumber)?.doubleValue
 
         self.pid = pid
+        self.sessionID = json["sessionId"] as? String
+        self.cwd = cwd
+        self.reportsStatus = reportsStatus
         if let started = (json["startedAt"] as? NSNumber)?.doubleValue {
             self.startedAt = Date(timeIntervalSince1970: started / 1000)
         } else {
@@ -44,8 +64,24 @@ struct ClaudeSessionRecord {
             detail: "\(Self.surface(json["entrypoint"] as? String)) · \(folder)",
             state: state,
             waitingFor: (json["waitingFor"] as? String) ?? (json["needs"] as? String),
-            since: millis.map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date()
+            // `startedAt` before the clock, because a desktop record carries
+            // neither `statusUpdatedAt` nor `updatedAt` and `Date()` is a
+            // different answer on every rescan — which makes the session look
+            // changed twice a second and sets the notch animating over and
+            // over. When the transcript is readable it replaces this anyway;
+            // this is what holds still until it is.
+            since: millis.map { Date(timeIntervalSince1970: $0 / 1000) }
+                ?? self.startedAt ?? Date()
         )
+    }
+
+    /// The same session, in a state read from somewhere other than the record.
+    ///
+    /// `waitingFor` is dropped on purpose: the only states that reach here come
+    /// from the transcript, and the transcript cannot see a permission prompt.
+    func session(state: AgentSession.State, since: Date) -> AgentSession {
+        AgentSession(id: session.id, name: session.name, detail: session.detail,
+                     state: state, waitingFor: nil, since: since)
     }
 
     static func surface(_ entrypoint: String?) -> String {
