@@ -76,6 +76,19 @@ certificate and an App Store Connect notary profile, and is only ever run by
 the maintainer to cut an official release. See
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
+A Debug build is ad-hoc signed, which means it has no stable code identity, so
+macOS cannot match it to a saved keychain "Always Allow" — the prompt to read a
+tool's token returns on every launch. To make the grant stick during local
+development, sign the built app with a stable self-signed identity:
+
+```sh
+Scripts/sign-local.sh   # signs /Applications/Codenotch.app (pass a path to override)
+```
+
+It creates a reusable `Codenotch Local Signing` certificate in your login
+keychain (no Apple Developer account needed) and re-signs the app. Grant the
+keychain prompt once more after signing; it will not ask again.
+
 Run with `CODENOTCH_DEMO=1` to see fixed sample data instead of live readings.
 
 ## Architecture
