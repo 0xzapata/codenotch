@@ -191,7 +191,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "gemini": AntigravityActivityMonitor()
         ]
         for profile in claudeProfiles {
-            monitors[profile.id] = ClaudeSessionMonitor(directory: profile.sessionsDirectory)
+            monitors[profile.id] = ClaudeSessionMonitor(
+                directory: profile.sessionsDirectory,
+                projects: profile.projectsDirectory
+            )
         }
         for (id, monitor) in monitors {
             monitor.sessionsPublisher
