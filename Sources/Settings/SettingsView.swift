@@ -1153,6 +1153,41 @@ private struct AccountRow: View {
                 .help("Fills the ring against a ceiling you choose; Google publishes "
                       + "none for an API key.")
             }
+            // Ollama owns its credential: the user enters an API key here, stored
+            // in the keychain. The env var OLLAMA_API_KEY is checked first, so a
+            // shell that exports one needs no entry here.
+            if provider.id == "ollama" {
+                ollamaKeyEntry
+            }
+        }
+    }
+
+    /// The API key input for Ollama. Stored in the keychain on Save, then a
+    /// refresh is triggered so the ring picks up the new credential without a
+    /// relaunch.
+    @State private var ollamaKey = ""
+    @State private var ollamaKeySaved = false
+
+    private var ollamaKeyEntry: some View {
+        HStack(spacing: 8) {
+            SecureField("Ollama API key", text: $ollamaKey)
+                .textContentType(.password)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+            Button("Save") {
+                guard !ollamaKey.isEmpty else { return }
+                OllamaCredentials.store(ollamaKey)
+                ollamaKey = ""
+                ollamaKeySaved = true
+                _ = signIn(provider.id)
+            }
+            .controlSize(.small)
+            .disabled(ollamaKey.isEmpty)
+            if ollamaKeySaved {
+                Text("Saved.")
+                    .foregroundStyle(.green)
+                    .controlSize(.small)
+            }
         }
     }
 
