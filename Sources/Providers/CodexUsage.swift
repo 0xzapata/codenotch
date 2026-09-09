@@ -144,7 +144,8 @@ enum CodexUsage {
                 id: id,
                 label: label(windowSeconds: window.limit_window_seconds ?? 0, fallback: id),
                 usedFraction: percent / 100,
-                resetsAt: resetsAt
+                resetsAt: resetsAt,
+                duration: window.limit_window_seconds
             ))
         }
         guard !windows.isEmpty else {

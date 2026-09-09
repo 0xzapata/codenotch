@@ -109,6 +109,7 @@ actor GeminiAPIProvider: UsageProvider {
         let budget = budget.flatMap { $0 > 0 ? $0 : nil }
         let total = sources.reduce(GeminiTokenUsage.zero) { $0.adding($1.usage) }
         let calendar = GeminiTokenUsage.calendar
+        let month = calendar.dateInterval(of: .month, for: now)
 
         var windows = [
             LimitWindow(
@@ -117,7 +118,8 @@ actor GeminiAPIProvider: UsageProvider {
                     ?? "Tokens this month · billed per token, no limit",
                 usedFraction: budget.map { Double(total.tokensThisMonth) / Double($0) },
                 used: total.tokensThisMonth,
-                resetsAt: calendar.dateInterval(of: .month, for: now)?.end
+                resetsAt: month?.end,
+                duration: month?.duration
             ),
             LimitWindow(
                 id: "today",

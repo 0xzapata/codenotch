@@ -28,15 +28,20 @@ enum GrokUsage {
 
         var windows: [LimitWindow] = []
 
-        let creditsReset = date(period(credits["currentPeriod"])?["end"])
-            ?? date(credits["billingPeriodEnd"])
+        let currentPeriod = period(credits["currentPeriod"])
+        let currentEnd = date(currentPeriod?["end"])
+        let creditsReset = currentEnd ?? date(credits["billingPeriodEnd"])
+        let start = currentEnd == nil
+            ? date(credits["billingPeriodStart"]) : date(currentPeriod?["start"])
+        let duration = start.flatMap { start in creditsReset.map { $0.timeIntervalSince(start) } }
 
         if let fraction = percent(credits["creditUsagePercent"]) {
             windows.append(LimitWindow(
                 id: "credits",
                 label: productLabel(credits) ?? "Grok Build",
                 usedFraction: fraction,
-                resetsAt: creditsReset
+                resetsAt: creditsReset,
+                duration: duration
             ))
         } else if let products = credits["productUsage"] as? [[String: Any]] {
             for product in products {
@@ -49,7 +54,8 @@ enum GrokUsage {
                     id: windows.isEmpty ? "credits" : ((product["product"] as? String) ?? name),
                     label: name,
                     usedFraction: fraction,
-                    resetsAt: creditsReset
+                    resetsAt: creditsReset,
+                    duration: duration
                 ))
             }
         }

@@ -44,6 +44,7 @@ final class UsageResponseTests: XCTestCase {
     func testDecodesTheLiveShape() throws {
         let windows = try decode(live).limitWindows()
         XCTAssertEqual(windows.count, 2)
+        XCTAssertEqual(windows.map(\.duration), [18000, 604800])
         XCTAssertEqual(windows[0].id, "session")
         XCTAssertEqual(windows[0].label, "Current session")
         XCTAssertEqual(windows[0].usedFraction ?? -1, 0.52, accuracy: 0.0001)

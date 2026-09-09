@@ -16,6 +16,18 @@ final class TooltipRenderTests: XCTestCase {
                      since: Date().addingTimeInterval(Double(-minutes) * 60))
     }
 
+    func testUsagePaceFitsTheExistingSummaryLine() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let window = LimitWindow(id: "weekly", label: "Weekly limit", usedFraction: 1,
+                                 resetsAt: now.addingTimeInterval(604800), duration: 604800)
+        let pace = try XCTUnwrap(window.usagePace(now: now))
+        let summary = "\(window.summary) · \(pace.summary)"
+        XCTAssertEqual(summary, "100% Used · 0% left · 100% deficit")
+        let font = NSFont.systemFont(ofSize: Design.fontSize(capPixels: 18))
+        let width = (summary as NSString).size(withAttributes: [.font: font]).width
+        XCTAssertLessThanOrEqual(width * 0.85, NotchLayout.cardTextWidth)
+    }
+
     func testTheCardLaysOutEverySessionState() throws {
         let snapshot = ProviderSnapshot(
             id: "claude", displayName: "Claude", glyph: .claude,

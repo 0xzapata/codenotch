@@ -105,7 +105,14 @@ enum GLMUsage {
             id: Self.id(for: limit),
             label: Self.label(for: limit),
             usedFraction: percentage / 100,
-            resetsAt: limit.nextResetTime.map { Date(timeIntervalSince1970: $0 / 1000) }
+            resetsAt: limit.nextResetTime.map { Date(timeIntervalSince1970: $0 / 1000) },
+            duration: limit.number.flatMap { number in
+                switch limit.unit {
+                case 3: return Double(number) * 3600
+                case 6: return Double(number) * 7 * 86400
+                default: return nil
+                }
+            }
         )
     }
 

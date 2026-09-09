@@ -6,6 +6,8 @@ import os
 /// What the user has chosen, kept in `UserDefaults`.
 @MainActor
 final class Preferences: ObservableObject {
+    static let showUsagePaceKey = "showUsagePace"
+
     /// Providers the user has switched off. Stored as the *disconnected* set
     /// rather than the connected one, so a provider added in a later version is
     /// on by default instead of silently staying dark.
@@ -92,6 +94,10 @@ final class Preferences: ObservableObject {
 
     @Published var resetTimeFormat: ResetTimeFormat {
         didSet { defaults.set(resetTimeFormat.rawValue, forKey: Keys.resetTimeFormat) }
+    }
+
+    @Published var showUsagePace: Bool {
+        didSet { defaults.set(showUsagePace, forKey: Self.showUsagePaceKey) }
     }
 
     /// The colour used for positive usage and active-work indicators.
@@ -280,6 +286,7 @@ final class Preferences: ObservableObject {
             .map(DisplayPreference.display) ?? .followActiveWindow
         self.resetTimeFormat = defaults.string(forKey: Keys.resetTimeFormat)
             .flatMap(ResetTimeFormat.init(rawValue:)) ?? .automatic
+        self.showUsagePace = defaults.bool(forKey: Self.showUsagePaceKey)
         // Absent means never chosen. Main display only, because that is what a
         // single-panel setup always did — all-displays on a fresh install
         // would put notches where none were expected.

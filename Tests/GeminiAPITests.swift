@@ -469,6 +469,7 @@ final class GeminiAPISnapshotTests: XCTestCase {
         )
         XCTAssertEqual(snapshot.fidelity, .manual)
         XCTAssertEqual(try XCTUnwrap(snapshot.headline?.usedFraction), 0.3255, accuracy: 0.0001)
+        XCTAssertEqual(snapshot.headline?.duration, 30 * 86400)
         XCTAssertTrue(snapshot.windows[0].label.contains("2.0M"),
                       "budget label was \(snapshot.windows[0].label)")
     }

@@ -391,7 +391,8 @@ struct UsageResponse: Decodable {
                 id: limit.kind,
                 label: limit.windowLabel,
                 usedFraction: limit.percent / 100,
-                resetsAt: resetsAt
+                resetsAt: resetsAt,
+                duration: Self.duration(forKind: limit.kind)
             )
         }
 
@@ -407,12 +408,18 @@ struct UsageResponse: Decodable {
             else { return }
             windows.append(LimitWindow(id: id, label: label,
                                        usedFraction: window.utilization / 100,
-                                       resetsAt: resetsAt))
+                                       resetsAt: resetsAt, duration: Self.duration(forKind: id)))
         }
         merge(fiveHour, id: "session", label: "Current session")
         merge(sevenDay, id: "weekly_all", label: "All models")
 
         return windows.sorted(by: UsageResponse.displayOrder)
+    }
+
+    static func duration(forKind kind: String) -> TimeInterval? {
+        if kind == "session" { return 5 * 3600 }
+        if kind.hasPrefix("weekly_") { return 7 * 86400 }
+        return nil
     }
 
     /// The frame's wording, for the kinds it drew.

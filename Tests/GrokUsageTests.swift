@@ -24,6 +24,7 @@ final class GrokUsageTests: XCTestCase {
 
     func testTheRingIsTheCreditsPercentage() throws {
         let credits = try XCTUnwrap(windows().first { $0.id == "credits" })
+        XCTAssertEqual(credits.duration, 7 * 86400)
         XCTAssertEqual(credits.label, "Grok Build")
         XCTAssertEqual(credits.usedFraction ?? -1, 0.08, accuracy: 0.0001)
     }
@@ -58,6 +59,7 @@ final class GrokUsageTests: XCTestCase {
         """
         let w = try GrokUsage.windows(creditsJSON: productOnly)
         let credits = try XCTUnwrap(w.first { $0.id == "credits" })
+        XCTAssertNil(credits.duration)
         XCTAssertEqual(credits.label, "Grok Build")
         XCTAssertEqual(credits.usedFraction ?? -1, 0.33, accuracy: 0.0001)
         let snap = ProviderSnapshot(

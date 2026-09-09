@@ -4,7 +4,8 @@ import XCTest
 final class GitHubCopilotUsageTests: XCTestCase {
     func testReadsCopilotQuotas() throws {
         let json = """
-        {"copilot_plan":"individual","quota_snapshots":{
+        {"copilot_plan":"individual","quota_reset_date":"2026-10-01T00:00:00Z",
+         "quota_snapshots":{
           "chat":{"entitlement":50,"remaining":48,"used":2,"unlimited":false},
           "completions":{"entitlement":2000,"remaining":1990,"used":10,"unlimited":false},
           "premium_interactions":{"entitlement":300,"remaining":294,"used":6,"unlimited":false}}}
@@ -14,6 +15,7 @@ final class GitHubCopilotUsageTests: XCTestCase {
         XCTAssertEqual(windows.map(\.id), ["premium_interactions", "chat", "completions"])
         XCTAssertEqual(windows[0].label, "Premium requests")
         XCTAssertEqual(windows[0].usedFraction ?? -1, 0.02, accuracy: 0.0001)
+        XCTAssertEqual(windows[0].duration, 30 * 86400)
         XCTAssertEqual(windows[1].usedFraction ?? -1, 0.04, accuracy: 0.0001)
     }
 

@@ -101,6 +101,7 @@ final class ClaudeUsageCLITests: XCTestCase {
 
         // 2:59pm in Jakarta is 07:59 UTC.
         XCTAssertEqual(windows[0].resetsAt, date("2026-09-07T07:59:00Z"))
+        XCTAssertEqual(windows[0].duration, 5 * 3600)
     }
 
     /// No year is printed. Read on New Year's Eve, a window resetting on Jan 2

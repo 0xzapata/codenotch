@@ -181,7 +181,8 @@ struct ClaudeUsageCLI: Sendable {
                 // optional by design, and losing a percentage that parsed
                 // perfectly well because the wording of a date changed is the
                 // worse failure of the two.
-                resetsAt: group(4).flatMap { Self.resetDate(from: $0, now: now) }
+                resetsAt: group(4).flatMap { Self.resetDate(from: $0, now: now) },
+                duration: UsageResponse.duration(forKind: kind)
             ))
         }
 

@@ -265,6 +265,7 @@ private struct LimitWindowRow: View {
     let fidelity: Fidelity
     let now: Date
     let resetTimeFormat: ResetTimeFormat
+    let showsUsagePace: Bool
     @Environment(\.codenotchAccentColor) private var accentColor
 
     private var band: UsageBand { UsageBand.band(for: window.usedFraction ?? 0) }
@@ -272,6 +273,14 @@ private struct LimitWindowRow: View {
     private var fillWidth: CGFloat {
         let fraction = CGFloat(min(max(window.usedFraction ?? 0, 0), 1))
         return max(NotchLayout.barHeight, trackWidth * fraction)
+    }
+
+    private var paceText: Text {
+        guard showsUsagePace, let pace = window.usagePace(now: now) else {
+            return Text("")
+        }
+        return Text(" · \(pace.summary)")
+            .foregroundColor(pace.isDeficit ? .orange : Palette.textSecondary)
     }
 
     /// Blank rather than invented: some providers never say when the window rolls.
@@ -294,9 +303,11 @@ private struct LimitWindowRow: View {
                 .padding(.top, NotchLayout.labelToBar)
             }
 
-            Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)")
+            Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)\(paceText)")
                 .font(Typography.cardBody)
                 .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .padding(.top, NotchLayout.barToUsed)
         }
     }
@@ -306,6 +317,7 @@ private struct ProviderTooltip: View {
     let snapshot: ProviderSnapshot
     let now: Date
     let resetTimeFormat: ResetTimeFormat
+    let showUsagePace: Bool
 
     /// Only worth saying when the numbers are not current. A remembered reading
     /// has to be dated, or it quietly passes itself off as live.
@@ -365,7 +377,7 @@ private struct ProviderTooltip: View {
                                 
                                 VStack(alignment: .leading, spacing: NotchLayout.blockSpacing) {
                                     ForEach(Array(group.windows.enumerated()), id: \.element.id) { windowIndex, window in
-                                        LimitWindowRow(window: window, inset: 2 * Design.px(16), fidelity: snapshot.fidelity, now: now, resetTimeFormat: resetTimeFormat)
+                                        LimitWindowRow(window: window, inset: 2 * Design.px(16), fidelity: snapshot.fidelity, now: now, resetTimeFormat: resetTimeFormat, showsUsagePace: showUsagePace)
                                             .padding(.top, windowIndex == 0 ? 0 : NotchLayout.blockSpacing)
                                     }
                                 }
@@ -378,7 +390,7 @@ private struct ProviderTooltip: View {
                             .padding(.top, groupIndex == 0 ? NotchLayout.headerToBlock : Design.px(28))
                         } else {
                             ForEach(Array(group.windows.enumerated()), id: \.element.id) { windowIndex, window in
-                                LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now, resetTimeFormat: resetTimeFormat)
+                                LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now, resetTimeFormat: resetTimeFormat, showsUsagePace: showUsagePace)
                                     .padding(.top, (groupIndex == 0 && windowIndex == 0) ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
                             }
                         }
@@ -672,6 +684,7 @@ struct TooltipCard: View {
     /// rather than fixed, so a big screen hides nothing.
     var sessionCap: Int = NotchLayout.defaultSessionCap
     var resetTimeFormat: ResetTimeFormat = .automatic
+    @AppStorage(Preferences.showUsagePaceKey) private var showUsagePace = false
 
     private var groupCount: Int {
         var groups = Set<String>()
@@ -707,7 +720,8 @@ struct TooltipCard: View {
             // drifts while the card resizes around them.
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ProviderTooltip(snapshot: snapshot, now: now, resetTimeFormat: resetTimeFormat)
+                    ProviderTooltip(snapshot: snapshot, now: now, resetTimeFormat: resetTimeFormat,
+                                    showUsagePace: showUsagePace)
                     if let tokenUsage = snapshot.tokenUsage {
                         CodexUsageSection(usage: tokenUsage, now: now)
                     }
