@@ -19,21 +19,24 @@ jobs:
           xcodebuild -project Codenotch.xcodeproj -scheme Codenotch -configuration Release \
             -destination 'platform=macOS' -derivedDataPath build/dd \
             CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="" \
-            build | tail -20
+            ENABLE_HARDENED_RUNTIME=NO build | tail -20
       # Sparkle ships signed with its own Developer ID. Library validation
       # under the hardened runtime refuses a framework whose Team ID differs
-      # from the app's, and an ad-hoc app has none — so on a real Mac the app
-      # died at launch with "different Team IDs". Re-sign every nested piece
-      # ad-hoc, innermost first, so the whole bundle carries one identity.
+      # from the app's, and an ad-hoc signature has no Team ID at all — so on
+      # a real Mac the app died at launch with "different Team IDs", even after
+      # Sparkle itself was re-signed ad-hoc. The hardened runtime is therefore
+      # off for this unsigned build (it is what turns library validation on),
+      # and every nested piece is re-signed ad-hoc, innermost first, so the
+      # bundle verifies as one unit.
       - name: Re-sign nested code ad-hoc
         run: |
           APP=build/dd/Build/Products/Release/Codenotch.app
           SP=$APP/Contents/Frameworks/Sparkle.framework/Versions/B
           for f in "$SP/XPCServices/Downloader.xpc" "$SP/XPCServices/Installer.xpc" \
                    "$SP/Updater.app" "$SP/Autoupdate" "$APP/Contents/Frameworks/Sparkle.framework"; do
-            codesign --force --sign - --options runtime "$f"
+            codesign --force --sign - "$f"
           done
-          codesign --force --sign - --options runtime "$APP"
+          codesign --force --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
       - name: Package
         run: |
