@@ -67,5 +67,21 @@ final class PreferencesMigrationTests: XCTestCase {
         XCTAssertEqual(preferences.notchVisibility, .onHover)
         XCTAssertEqual(preferences.appPresence, .dock)
         XCTAssertEqual(preferences.notchEdge, .right)
+        XCTAssertEqual(preferences.notchSize, .medium)
+    }
+
+    /// The size has to outlive the launch that chose it, or it reads as a
+    /// setting that did not take.
+    func testTheNotchSizeSurvivesARelaunch() {
+        let (fresh, name) = makeDefaults()
+        Preferences(defaults: fresh).notchSize = .large
+
+        XCTAssertEqual(Preferences(defaults: UserDefaults(suiteName: name)!).notchSize, .large)
+    }
+
+    /// An install that predates the setting keeps exactly the notch it had.
+    /// `medium` is the design frame at 1:1, so this is what makes that true.
+    func testMediumIsTheSizeEveryEarlierVersionDrew() {
+        XCTAssertEqual(NotchSize.medium.scale, 1)
     }
 }

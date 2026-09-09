@@ -19,6 +19,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let switchAccount: (String) -> Bool
     private let retry: (String) -> Void
     private let updater: Updater
+    private let resetPosition: () -> Void
 
     init(preferences: Preferences,
          providers: @escaping () -> [ProviderSummary],
@@ -26,7 +27,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
          signOut: @escaping (String) -> Void,
          signIn: @escaping (String) -> Bool,
          switchAccount: @escaping (String) -> Bool,
-         retry: @escaping (String) -> Void) {
+         retry: @escaping (String) -> Void,
+         resetPosition: @escaping () -> Void) {
+        self.resetPosition = resetPosition
         self.switchAccount = switchAccount
         self.retry = retry
         self.updater = updater
@@ -143,6 +146,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                                    signIn: signIn,
                                    switchAccount: switchAccount,
                                    retry: retry,
+                                   resetPosition: resetPosition,
                                    updater: updater)
         )
         window.center()

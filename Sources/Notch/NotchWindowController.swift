@@ -231,8 +231,8 @@ final class NotchWindowController {
         placement.rect(
             along: model.slack,
             across: 0,
-            length: model.shapeLength,
-            depth: model.notchDepth
+            length: model.shapeLength * model.sizeScale,
+            depth: model.notchDepth * model.sizeScale
         )
     }
 
@@ -243,12 +243,12 @@ final class NotchWindowController {
         // Whatever the resting shape is — the pill, or the display's own notch
         // when it is joining one — the region that wakes it is that plus a
         // generous band, because both are small targets on a screen edge.
-        let length = max(model.restingLength, NotchLayout.pillHotZone)
+        let length = max(model.restingLength * model.sizeScale, NotchLayout.pillHotZone)
         return placement.rect(
-            along: model.slack + (model.shapeLength - length) / 2,
+            along: model.slack + (model.shapeLength * model.sizeScale - length) / 2,
             across: 0,
             length: length,
-            depth: model.restingDepth + NotchLayout.pillHotZone
+            depth: model.restingDepth * model.sizeScale + NotchLayout.pillHotZone
         )
     }
 
@@ -258,7 +258,8 @@ final class NotchWindowController {
     private var handleRect: CGRect {
         let side = NotchLayout.orbHotZone
         let boxes = model.orbHandlePoints.map { point -> CGRect in
-            let centre = placement.point(along: model.slack + point.x, across: point.y)
+            let centre = placement.point(along: model.slack + point.x * model.sizeScale,
+                                         across: point.y * model.sizeScale)
             return CGRect(x: centre.x - side / 2, y: centre.y - side / 2,
                           width: side, height: side)
         }
@@ -268,8 +269,13 @@ final class NotchWindowController {
     /// Whether the pointer is on the handle itself rather than merely inside
     /// the box that contains it.
     private func isOverHandle(_ local: CGPoint) -> Bool {
-        model.isOnOrbHandle(along: placement.along(of: local) - model.slack,
-                            across: placement.across(of: local))
+        // Back into the notch's own measurements, which is what `isOnOrbHandle`
+        // is written in — the orb scales with the notch, so its hit test has to
+        // be asked in the same space the shape was drawn in.
+        model.isOnOrbHandle(
+            along: (placement.along(of: local) - model.slack) / model.sizeScale,
+            across: placement.across(of: local) / model.sizeScale
+        )
     }
 
     /// The only region that takes the mouse. Everything else in the panel is a
@@ -298,10 +304,12 @@ final class NotchWindowController {
         // pointer has to cross. Along it, the card's own extent.
         let cardAcross = model.edge.isVertical ? NotchLayout.cardWidth : cardHeight
         let cardAlong = model.edge.isVertical ? cardHeight : NotchLayout.cardWidth
-        let centre = model.slack + model.ringCenter(index: index)
+        let centre = model.slack + model.ringCenter(index: index) * model.sizeScale
         return placement.rect(
             along: centre - cardAlong / 2,
-            across: model.contentInset + NotchLayout.bodyDepth(for: model.edge),
+            // The card's own extent does not scale, and it begins where the
+            // drawn notch ends.
+            across: model.notchDrawnDepth,
             length: cardAlong,
             depth: NotchLayout.tailGap + NotchLayout.tailLength + cardAcross
         )
@@ -535,6 +543,19 @@ final class NotchWindowController {
     /// animation can smooth over, and animating a panel across a corner looks
     /// like a bug rather than a choice — hence the crossing rather than a
     /// slide.
+    /// A new size choice: set it, then rebuild the panel around it.
+    ///
+    /// Set-then-relocate rather than a subscription on `model.$sizeScale`,
+    /// because `@Published` fires in `willSet` — a sink here would recompute
+    /// the panel from the size that is being replaced. `apply(edge:)` is the
+    /// same shape for the same reason.
+    func apply(size: NotchSize) {
+        guard model.sizeScale != size.scale else { return }
+        model.sizeScale = size.scale
+        relocate()
+        updateInteractiveRects()
+    }
+
     func apply(edge: NotchEdge) {
         guard model.edge != edge else { return }
         guard let panel else {   // before there is anything on screen to fade
@@ -731,10 +752,13 @@ final class NotchWindowController {
         updateInteractiveRects()
     }
 
+    /// `along` arrives in panel points, so the cells it is compared against
+    /// have to be where they are drawn rather than where they are measured —
+    /// pitch included, or a large notch would match the wrong ring at the ends.
     private func cellIndex(along: CGFloat) -> Int? {
-        let pitch = NotchLayout.cellPitch(for: model.edge)
+        let pitch = NotchLayout.cellPitch(for: model.edge) * model.sizeScale
         for index in model.snapshots.indices {
-            let centre = model.slack + model.ringCenter(index: index)
+            let centre = model.slack + model.ringCenter(index: index) * model.sizeScale
             if abs(along - centre) <= pitch / 2 { return index }
         }
         return nil

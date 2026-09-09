@@ -103,6 +103,7 @@ final class AccessibilityTransparencyTests: XCTestCase {
             signIn: { _ in false },
             switchAccount: { _ in false },
             retry: { _ in },
+            resetPosition: {},
             updater: updater
         )
         .environment(\.codenotchReduceTransparency, true)

@@ -119,7 +119,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 switchAccount: { [weak store] in
                     store?.openAccountSource(providerID: $0) ?? false
                 },
-                retry: { [weak store] in store?.reauthorize(providerID: $0) }
+                retry: { [weak store] in store?.reauthorize(providerID: $0) },
+                // Both halves, because the stored nudge and the live one are
+                // kept apart on purpose — clearing only the preference would
+                // leave the notch where it is until the next edge change, and
+                // moving only the panel would put it back on relaunch.
+                resetPosition: { [weak fleet, weak preferences] in
+                    preferences?.setOffset(0, for: preferences?.notchEdge ?? .right)
+                    fleet?.apply(alongOffset: 0)
+                }
             )
             fleet.onOpenSettings = { [weak settings] in settings?.show() }
             self.settings = settings
@@ -174,6 +182,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     fleet?.apply(alongOffset: preferences?.offset(for: edge) ?? 0)
                     fleet?.apply(edge: edge)
                 }
+                .store(in: &cancellables)
+
+            preferences.$notchSize
+                .receive(on: RunLoop.main)
+                .sink { [weak fleet] in fleet?.apply(size: $0) }
                 .store(in: &cancellables)
 
             preferences.$notchScope
@@ -313,6 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so this has to be the very last thing that can create one.
         fleet.apply(displayPreference: preferences.displayPreference)
         fleet.apply(alongOffset: preferences.offset(for: preferences.notchEdge))
+        fleet.apply(size: preferences.notchSize)
         fleet.apply(resetTimeFormat: preferences.resetTimeFormat)
         fleet.apply(accentColor: preferences.accentColor)
         fleet.show()

@@ -135,6 +135,14 @@ when the Dock hides or moves. On a Mac with a hardware notch, the top
 placement takes its exact shape, so the two read as one rather than as a bar
 parked underneath it.
 
+Along that edge it sits wherever you put it: hold ⌥ and drag the notch to
+slide it, and each edge remembers where you left it, so moving the notch to the
+top and back does not lose the place you chose on the right. **Recentre** in
+Settings → Appearance puts the current edge back in the middle.
+
+**Size** in the same place draws the whole notch — rings, text, tooltip and all
+— smaller or larger. Medium is the size it was designed at.
+
 At rest it is a small pill on the screen edge that unfolds when the pointer
 reaches it — configurable in Settings to always show, or to hide entirely.
 Settings live in an orb below the notch: an arc at rest, a gear on hover.

@@ -142,6 +142,11 @@ struct SettingsView: View {
     /// Re-reads a provider's credential. For a declined keychain prompt that is
     /// the whole remedy: asking again is what puts the prompt back on screen.
     let retry: (String) -> Void
+    /// Put the notch back in the middle of its edge. A closure rather than a
+    /// write to `preferences`, because the stored offset is not `@Published` —
+    /// nothing would tell the notch to move, and the setting would only take
+    /// effect the next time the edge changed.
+    let resetPosition: () -> Void
     @ObservedObject var updater: Updater
     @Environment(\.codenotchReduceTransparency) private var reduceTransparency
 
@@ -465,6 +470,32 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Picker("Size", selection: $preferences.notchSize) {
+                    ForEach(NotchSize.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+
+                Text(preferences.notchSize.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // The nudge has been draggable since the edge picker existed,
+                // and nothing on screen has ever said so — the only way to
+                // find it was to hold ⌥ on the notch and see what happened.
+                // This is also the only way back from a nudge that went too
+                // far, short of dragging it out again.
+                HStack {
+                    Text("Hold ⌥ and drag the notch to slide it along its edge. "
+                         + "Each edge remembers where you left it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Recentre", action: resetPosition)
+                        .controlSize(.small)
+                }
 
                 Picker("Displays", selection: $preferences.notchScope) {
                     ForEach(NotchScreenScope.allCases) { Text($0.title).tag($0) }
