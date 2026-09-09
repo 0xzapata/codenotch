@@ -288,7 +288,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "ollama-local": OllamaActivityMonitor()
         ]
         for profile in claudeProfiles {
-            monitors[profile.id] = ClaudeSessionMonitor(directory: profile.sessionsDirectory)
+            monitors[profile.id] = ClaudeSessionMonitor(
+                directory: profile.sessionsDirectory,
+                projects: profile.projectsDirectory
+            )
         }
         for profile in codexProfiles {
             monitors[profile.id] = CodexActivityMonitor(profile: profile)

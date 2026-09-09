@@ -153,6 +153,11 @@ struct ClaudeProfile: Equatable, Hashable {
     /// Where Claude Code writes one file per running process.
     var sessionsDirectory: URL { configDirectory.appendingPathComponent("sessions") }
 
+    /// Where it writes each session's transcript, one directory per working
+    /// directory. The registry says which sessions exist; this says what they
+    /// are doing — see `ClaudeTranscript`.
+    var projectsDirectory: URL { configDirectory.appendingPathComponent("projects") }
+
     /// Claude Code's own settings file, which carries the signed-in address.
     ///
     /// The default profile keeps it *beside* the directory, at `~/.claude.json`;
