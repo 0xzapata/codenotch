@@ -269,7 +269,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "cursor": CursorActivityMonitor(),
             "gemini": AntigravityActivityMonitor(),
             "grok": GrokActivityMonitor(),
-            "gemini-api": GeminiCLIActivityMonitor()
+            "gemini-api": GeminiCLIActivityMonitor(),
+            "ollama": OllamaActivityMonitor(),
+            "ollama-local": OllamaActivityMonitor()
         ]
         for profile in claudeProfiles {
             monitors[profile.id] = ClaudeSessionMonitor(directory: profile.sessionsDirectory)
