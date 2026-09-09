@@ -71,13 +71,44 @@ actor CodexLocalProvider: UsageProvider {
         }
 
         let windows = try CodexUsage.windows(from: data)
+
+        // The profile page's token statistics are the source for the chart and
+        // totals.
+        let profileUsage = try? await Self.fetchProfileUsage(
+            session: session, credential: credential
+        )
         retryNoEarlierThan = nil
         archive.saveBackoffUntil(nil, providerID: id)
         return ProviderSnapshot(
             id: id, displayName: displayName, glyph: glyph,
             fidelity: .official, status: .ok, windows: windows,
-            headlineID: windows.first?.id
+            headlineID: windows.first?.id,
+            tokenUsage: profileUsage
         )
+    }
+
+    private static func fetchProfileUsage(
+        session: URLSession,
+        credential: CodexCredentials.Credential
+    ) async throws -> CodexTokenUsage {
+        var request = URLRequest(
+            url: URL(string: "https://chatgpt.com/backend-api/wham/profiles/me")!,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 15
+        )
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(credential.accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401 || status == 403 { throw UsageProviderError.needsAuth }
+        guard (200..<300).contains(status) else {
+            throw UsageProviderError.badResponse(status: status)
+        }
+        return try CodexUsage.profileUsage(from: data)
     }
 
     private static func retryAfter(from response: HTTPURLResponse?, now: Date) -> TimeInterval? {

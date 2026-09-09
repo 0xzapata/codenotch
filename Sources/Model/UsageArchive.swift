@@ -16,6 +16,9 @@ struct UsageArchive {
         let fetchedAt: Date
         /// Optional so archives written before this field still decode.
         let headlineID: String?
+        /// Optional so archives written before Codex token activity existed
+        /// continue to open and show their last quota reading.
+        let tokenUsage: CodexTokenUsage?
     }
 
     private let defaults: UserDefaults
@@ -80,7 +83,8 @@ struct UsageArchive {
                 fidelity: entry.fidelity,
                 status: .stale(since: entry.fetchedAt),
                 windows: entry.windows,
-                headlineID: entry.headlineID
+                headlineID: entry.headlineID,
+                tokenUsage: entry.tokenUsage
             )
             result[entry.id] = (snapshot, entry.fetchedAt)
         }
@@ -96,7 +100,8 @@ struct UsageArchive {
                 fidelity: $0.snapshot.fidelity,
                 windows: $0.snapshot.windows,
                 fetchedAt: $0.fetchedAt,
-                headlineID: $0.snapshot.headlineID
+                headlineID: $0.snapshot.headlineID,
+                tokenUsage: $0.snapshot.tokenUsage
             )
         }
         guard let data = try? JSONEncoder().encode(entries) else { return }

@@ -110,6 +110,55 @@ final class CodexUsageTests: XCTestCase {
           "secondary_window":null}}
         """))
     }
+
+    func testDecodesProfileTokenUsageAndBuildsAThirtyDaySeries() throws {
+        let json = """
+        {"profile":{"display_name":"Test"},
+         "stats":{"lifetime_tokens":1200,"peak_daily_tokens":300,
+         "longest_running_turn_sec":4020,"current_streak_days":2,"longest_streak_days":11,
+         "daily_usage_buckets":[
+           {"start_date":"2026-08-12","tokens":100},
+           {"start_date":"2026-09-03","tokens":200},
+           {"start_date":"2026-09-08","tokens":300}
+         ]}}
+        """
+        let usage = try CodexUsage.profileUsage(from: Data(json.utf8))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 9))!
+
+        XCTAssertEqual(usage.last30Days(now: now, calendar: calendar).count, 30)
+        XCTAssertEqual(usage.last30Days(now: now, calendar: calendar).first?.startDate,
+                       "2026-08-11")
+        XCTAssertEqual(usage.usageInLast30Days(now: now, calendar: calendar), 600)
+        XCTAssertEqual(usage.peakDailyTokens, 300)
+        XCTAssertEqual(usage.summary?.lifetimeTokens, 1200)
+        XCTAssertEqual(usage.summary?.peakDailyTokens, 300)
+        XCTAssertEqual(usage.summary?.longestRunningTurnSeconds, 4020)
+        XCTAssertEqual(usage.summary?.currentStreakDays, 2)
+        XCTAssertEqual(usage.summary?.longestStreakDays, 11)
+        XCTAssertEqual(usage.usageToday(now: now, calendar: calendar), nil,
+                       "a missing current-day bucket should be shown as Pending")
+    }
+
+    func testAccountUsageCardGetsRoomForTheActivitySection() {
+        let plain = NotchLayout.cardHeight(windowCount: 2)
+        let withTokens = NotchLayout.cardHeight(windowCount: 2, hasTokenUsage: true)
+
+        XCTAssertGreaterThan(withTokens, plain)
+        XCTAssertEqual(
+            withTokens - plain,
+            NotchLayout.codexUsageTop + NotchLayout.hairline + NotchLayout.blockSpacing
+                + NotchLayout.codexMetricTop + NotchLayout.codexMetricHeight
+                + NotchLayout.codexMetricBottom
+                + NotchLayout.hairline
+                + 2 * NotchLayout.cardBodyLineHeight
+                + NotchLayout.codexUsageRowGap
+                + NotchLayout.codexChartTop + NotchLayout.codexChartHeight,
+            accuracy: 0.001
+        )
+    }
+
 }
 
 /// The activity signal is a heuristic — a rollout written moments ago — so what
@@ -277,4 +326,3 @@ final class UsageBlockTests: XCTestCase {
         )
     }
 }
-

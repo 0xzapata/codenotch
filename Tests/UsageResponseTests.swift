@@ -218,6 +218,28 @@ final class UsageArchiveTests: XCTestCase {
         XCTAssertEqual(restored?.fetchedAt, taken)
     }
 
+    func testCodexDailyUsageRoundTripsWithTheQuotaReading() {
+        let defaults = makeDefaults()
+        let usage = CodexTokenUsage(
+            summary: .init(lifetimeTokens: 90, peakDailyTokens: 90,
+                            longestRunningTurnSeconds: 3600,
+                            currentStreakDays: 1, longestStreakDays: 3),
+            dailyUsageBuckets: [.init(
+                startDate: "2026-09-08", tokens: 90
+            )]
+        )
+        let snapshot = ProviderSnapshot(
+            id: "codex", displayName: "Codex", glyph: .openai,
+            fidelity: .official, status: .ok,
+            windows: [LimitWindow(id: "primary", label: "5h limit", usedFraction: 0.2)],
+            tokenUsage: usage
+        )
+        UsageArchive(defaults: defaults).save(["codex": (snapshot, Date())])
+
+        let restored = UsageArchive(defaults: defaults).load()["codex"]?.snapshot
+        XCTAssertEqual(restored?.tokenUsage, usage)
+    }
+
     /// A restored reading is never presented as live.
     func testRestoredReadingsComeBackStale() throws {
         let defaults = makeDefaults()

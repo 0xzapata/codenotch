@@ -291,7 +291,8 @@ final class NotchWindowController {
             sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
             sessionCap: model.sessionCap,
             statusMessage: snapshot.statusMessage,
-            blockMessage: snapshot.block?.summary(now: model.now)
+            blockMessage: snapshot.block?.summary(now: model.now),
+            hasTokenUsage: snapshot.tokenUsage != nil
         )
         // Across the stack the region is the card, its tail, and the gap the
         // pointer has to cross. Along it, the card's own extent.
