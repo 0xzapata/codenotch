@@ -73,6 +73,7 @@ enum Percent {
 /// and the longer all-models window), others have one.
 struct LimitWindow: Identifiable, Codable, Equatable {
     let id: String
+    let group: String?
     let label: String
     /// 0...1+, where 1 means the limit is spent. Nil when the provider reports
     /// what is left but never says what the limit was — Perplexity does exactly
@@ -86,9 +87,10 @@ struct LimitWindow: Identifiable, Codable, Equatable {
     /// Nil when the provider does not say when the window rolls over.
     let resetsAt: Date?
 
-    init(id: String, label: String, usedFraction: Double? = nil,
+    init(id: String, group: String? = nil, label: String, usedFraction: Double? = nil,
          remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil) {
         self.id = id
+        self.group = group
         self.label = label
         self.usedFraction = usedFraction
         self.remaining = remaining

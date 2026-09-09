@@ -298,7 +298,8 @@ final class AntigravityBridgeTests: XCTestCase {
         XCTAssertEqual(windows.count, 2)
         XCTAssertEqual(windows[0].id, "gemini-weekly")
         XCTAssertEqual(windows[0].usedFraction ?? 0, 1 - 0.96262, accuracy: 0.00001)
-        XCTAssertEqual(windows[0].label, "Gemini Models")
+        XCTAssertEqual(windows[0].label, "Weekly Limit")
+        XCTAssertEqual(windows[0].group, "Gemini Models")
     }
 
     /// A full bucket is 0% used, not "no reading".

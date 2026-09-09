@@ -271,7 +271,7 @@ enum NotchLayout {
     /// The tooltip's height for a given number of limit windows and live
     /// sessions. Worked out here rather than left to SwiftUI so the hover region
     /// can be computed before the card is ever laid out.
-    static func cardHeight(windowCount: Int, sessionCount: Int = 0,
+    static func cardHeight(windowCount: Int, groupCount: Int = 0, sessionCount: Int = 0,
                            sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
                            blockMessage: String? = nil) -> CGFloat {
@@ -289,6 +289,19 @@ enum NotchLayout {
             height += headerToBlock
                 + CGFloat(windowCount) * block
                 + CGFloat(windowCount - 1) * blockSpacing
+            if groupCount > 0 {
+                // Each group adds a title line, spacing (12), and 16px vertical padding inside the box
+                let groupExtra = cardBodyLineHeight + Design.px(12) + 2 * Design.px(16)
+                height += CGFloat(groupCount) * groupExtra
+                
+                if groupCount > 1 {
+                    // We use 28px between groups instead of the default 20px (blockSpacing)
+                    height += CGFloat(groupCount - 1) * (Design.px(28) - blockSpacing)
+                }
+                
+                // Extra padding at the very bottom
+                height += Design.px(8)
+            }
         } else {
             // The status message, at whatever height it actually wraps to.
             height += headerToBlock + bodyTextHeight(statusMessage ?? "")
@@ -356,13 +369,13 @@ enum NotchLayout {
     /// is a sum of a dozen named parts, and an inverted copy of it would have
     /// to be kept in step by hand. The range is short enough that the search
     /// costs nothing.
-    static func sessionsFitting(cardBudget: CGFloat, windowCount: Int) -> Int {
+    static func sessionsFitting(cardBudget: CGFloat, windowCount: Int, groupCount: Int = 2) -> Int {
         var fits = 0
         for n in 1...sessionCeiling {
             // Costed as though something were still hidden, so that admitting
             // the nth row can never be what pushes the summary line off the
             // bottom of the card.
-            let height = cardHeight(windowCount: windowCount,
+            let height = cardHeight(windowCount: windowCount, groupCount: groupCount,
                                     sessionCount: n + 1, sessionCap: n)
             guard height <= cardBudget else { break }
             fits = n
@@ -385,7 +398,7 @@ enum NotchLayout {
     /// generous that the panel runs off the screen, which is what the cap is
     /// solved for.
     static func maxCardHeight(sessionCap: Int) -> CGFloat {
-        cardHeight(windowCount: maxWindowCount,
+        cardHeight(windowCount: maxWindowCount, groupCount: 2,
                    sessionCount: sessionCap + 1, sessionCap: sessionCap)
     }
 

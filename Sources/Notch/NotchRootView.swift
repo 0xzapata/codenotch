@@ -19,32 +19,30 @@ struct NotchRootView: View {
                 // Outside the notch and outside its clip: the orb hangs past
                 // the end of the shape, tucked into the corner the far flare
                 // makes.
-                if !model.snapshots.isEmpty {
-                    SettingsOrb(isHovered: model.isHoveringSettings, edge: model.edge,
-                                    convex: model.orbHugsCorner,
-                                    arcRadius: model.orbArcRadius,
-                                    arcOffset: model.orbArcOffset)
-                        // A second route to the same action the panel's own
-                        // `mouseDown` override reaches for — see
-                        // `NotchViewModel.onOpenSettings`. Both still depend
-                        // on the panel's `ignoresMouseEvents`/`hitTest` gate
-                        // to receive the click at all, so this alone would
-                        // not rescue a click that never reaches the content
-                        // view — but once it does, this fires reliably where
-                        // the AppKit-level path did not.
-                        .contentShape(Circle())
-                        .onTapGesture { model.onOpenSettings?() }
-                        .position(orbCentre(place))
-                        // Outward, into the black — not inward to nothing.
-                        .scaleEffect(model.isExpanded ? 1 : model.orbMergeScale)
-                        // Full strength the whole way in. The arc is buried in
-                        // the notch before this reaches zero, so the fade is
-                        // only there to guarantee nothing is left on screen
-                        // once the notch has folded — it is never what the eye
-                        // sees the arc leave by.
-                        .opacity(model.isExpanded ? 1 : 0)
-                        .animation(motion(orbMotion), value: model.isExpanded)
-                }
+                SettingsOrb(isHovered: model.isHoveringSettings, edge: model.edge,
+                                convex: model.orbHugsCorner,
+                                arcRadius: model.orbArcRadius,
+                                arcOffset: model.orbArcOffset)
+                    // A second route to the same action the panel's own
+                    // `mouseDown` override reaches for — see
+                    // `NotchViewModel.onOpenSettings`. Both still depend
+                    // on the panel's `ignoresMouseEvents`/`hitTest` gate
+                    // to receive the click at all, so this alone would
+                    // not rescue a click that never reaches the content
+                    // view — but once it does, this fires reliably where
+                    // the AppKit-level path did not.
+                    .contentShape(Circle())
+                    .onTapGesture { model.onOpenSettings?() }
+                    .position(orbCentre(place))
+                    // Outward, into the black — not inward to nothing.
+                    .scaleEffect(model.isExpanded ? 1 : model.orbMergeScale)
+                    // Full strength the whole way in. The arc is buried in
+                    // the notch before this reaches zero, so the fade is
+                    // only there to guarantee nothing is left on screen
+                    // once the notch has folded — it is never what the eye
+                    // sees the arc leave by.
+                    .opacity(model.isExpanded ? 1 : 0)
+                    .animation(motion(orbMotion), value: model.isExpanded)
 
                 if let snapshot = model.hoveredSnapshot, let index = model.hoveredIndex,
                    model.isExpanded {

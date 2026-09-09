@@ -261,13 +261,14 @@ private struct StatusRing: View {
 /// percentage burned.
 private struct LimitWindowRow: View {
     let window: LimitWindow
+    var inset: CGFloat = 0
     let fidelity: Fidelity
     let now: Date
     let resetTimeFormat: ResetTimeFormat
     @Environment(\.codenotchAccentColor) private var accentColor
 
     private var band: UsageBand { UsageBand.band(for: window.usedFraction ?? 0) }
-    private var trackWidth: CGFloat { NotchLayout.cardWidth - 2 * NotchLayout.cardPadding }
+    private var trackWidth: CGFloat { NotchLayout.cardWidth - 2 * NotchLayout.cardPadding - inset }
     private var fillWidth: CGFloat {
         let fraction = CGFloat(min(max(window.usedFraction ?? 0, 0), 1))
         return max(NotchLayout.barHeight, trackWidth * fraction)
@@ -315,6 +316,24 @@ private struct ProviderTooltip: View {
         return ElapsedCopy.ago(since: since, now: now)
     }
 
+    private struct WindowGroup: Identifiable {
+        let id: String
+        let title: String?
+        var windows: [LimitWindow]
+    }
+
+    private var groupedWindows: [WindowGroup] {
+        var result: [WindowGroup] = []
+        for window in snapshot.windows {
+            if let last = result.last, last.title == window.group {
+                result[result.count - 1].windows.append(window)
+            } else {
+                result.append(WindowGroup(id: window.group ?? window.id, title: window.group, windows: [window]))
+            }
+        }
+        return result
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             TooltipHeader(title: "\(snapshot.displayName) Usage", note: readingAge) {
@@ -334,11 +353,38 @@ private struct ProviderTooltip: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, NotchLayout.headerToBlock)
             } else {
-                ForEach(Array(snapshot.windows.enumerated()), id: \.element.id) { index, window in
-                    LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now,
-                                   resetTimeFormat: resetTimeFormat)
-                        .padding(.top, index == 0 ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(groupedWindows.enumerated()), id: \.element.id) { groupIndex, group in
+                        if let title = group.title {
+                            VStack(alignment: .leading, spacing: Design.px(12)) {
+                                Text(title)
+                                    .font(Typography.cardBody)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(Palette.textPrimary)
+                                    .padding(.leading, Design.px(4))
+                                
+                                VStack(alignment: .leading, spacing: NotchLayout.blockSpacing) {
+                                    ForEach(Array(group.windows.enumerated()), id: \.element.id) { windowIndex, window in
+                                        LimitWindowRow(window: window, inset: 2 * Design.px(16), fidelity: snapshot.fidelity, now: now, resetTimeFormat: resetTimeFormat)
+                                            .padding(.top, windowIndex == 0 ? 0 : NotchLayout.blockSpacing)
+                                    }
+                                }
+                                .padding(Design.px(16))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: Design.px(20))
+                                        .stroke(Color.white.opacity(0.25), lineWidth: Design.px(1.5))
+                                )
+                            }
+                            .padding(.top, groupIndex == 0 ? NotchLayout.headerToBlock : Design.px(28))
+                        } else {
+                            ForEach(Array(group.windows.enumerated()), id: \.element.id) { windowIndex, window in
+                                LimitWindowRow(window: window, fidelity: snapshot.fidelity, now: now, resetTimeFormat: resetTimeFormat)
+                                    .padding(.top, (groupIndex == 0 && windowIndex == 0) ? NotchLayout.headerToBlock : NotchLayout.blockSpacing)
+                            }
+                        }
+                    }
                 }
+                .padding(.bottom, groupedWindows.contains(where: { $0.title != nil }) ? Design.px(8) : 0)
             }
         }
     }
@@ -471,11 +517,24 @@ struct TooltipCard: View {
     var sessionCap: Int = NotchLayout.defaultSessionCap
     var resetTimeFormat: ResetTimeFormat = .automatic
 
+    private var groupCount: Int {
+        var groups = Set<String>()
+        var count = 0
+        for window in snapshot.windows {
+            if let group = window.group, !groups.contains(group) {
+                groups.insert(group)
+                count += 1
+            }
+        }
+        return count
+    }
+
     /// The same figure the hover region uses, so what is drawn and what is
     /// reachable can never drift apart.
     private var height: CGFloat {
         NotchLayout.cardHeight(
             windowCount: snapshot.windows.count,
+            groupCount: groupCount,
             sessionCount: activity?.sessions.count ?? 0,
             sessionCap: sessionCap,
             statusMessage: snapshot.statusMessage,

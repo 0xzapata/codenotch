@@ -81,16 +81,21 @@ final class AntigravityActivityMonitor: AgentActivityMonitor {
     static func session(
         trajectory: URL, modified: Date, staleAfter: TimeInterval, now: Date
     ) -> AgentSession? {
-        guard now.timeIntervalSince(modified) <= staleAfter else { return nil }
+        let age = now.timeIntervalSince(modified)
+        // Keep it around as 'idle' for a moment so the watcher sees it finish.
+        guard age <= staleAfter + 15 else { return nil }
+
         // The trajectory's own directory names it; the file is always
         // `transcript.jsonl`.
         let id = trajectory.deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
+            
+        let isBusy = age <= staleAfter
         return AgentSession(
             id: "antigravity.\(id)",
             name: "Antigravity",
-            detail: "Working",
-            state: .busy,
+            detail: isBusy ? "Working" : "Idle",
+            state: isBusy ? .busy : .idle,
             waitingFor: nil,
             since: modified
         )

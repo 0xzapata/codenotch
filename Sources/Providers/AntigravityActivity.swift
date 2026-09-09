@@ -17,7 +17,12 @@ struct AntigravityActivity: Equatable {
     let lastRequest: Date?
 
     static var transcriptRoot: URL {
-        URL(fileURLWithPath: NSHomeDirectory())
+        let idePath = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".gemini/antigravity-ide/brain")
+        if FileManager.default.fileExists(atPath: idePath.path) {
+            return idePath
+        }
+        return URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".gemini/antigravity/brain")
     }
 

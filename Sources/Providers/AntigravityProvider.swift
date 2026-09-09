@@ -65,6 +65,14 @@ actor AntigravityProvider: UsageProvider {
     nonisolated func forgetCachedCredential() { AntigravityCredentials.forgetCached() }
 
     nonisolated func account() -> ProviderAccount? {
+        if UserDefaults.standard.bool(forKey: "AntigravityEverBridged") {
+            return ProviderAccount(
+                label: nil,
+                plan: "IDE Session",
+                source: "Antigravity IDE",
+                manageURL: URL(string: "https://antigravity.google")
+            )
+        }
         // Presence, not contents. This row is rebuilt every time the settings
         // window renders, and reading the secret to print a plan name made
         // opening Settings raise the keychain dialogue — the same interruption
@@ -96,9 +104,16 @@ actor AntigravityProvider: UsageProvider {
         // running on the same machine, never asked.
         if let windows = await localQuota(), !windows.isEmpty {
             everBridged = true
+            UserDefaults.standard.set(true, forKey: "AntigravityEverBridged")
+            
+            // Antigravity now has multiple limits (Weekly, 5-hour).
+            // The user prefers the 'hour' limit to be shown as the main notch ring percentage.
+            let hourlies = windows.filter { $0.id.lowercased().contains("hour") || $0.label.lowercased().contains("hour") }
+            let mostConstrained = hourlies.max(by: { ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0) }) ?? windows.max(by: { ($0.usedFraction ?? 0) < ($1.usedFraction ?? 0) })
+            
             return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                     fidelity: .official, status: .ok, windows: windows,
-                                    headlineID: "gemini-weekly")
+                                    headlineID: mostConstrained?.id ?? "gemini-hourly")
         }
 
         // Antigravity has answered before and is not answering now: it has been
@@ -135,9 +150,13 @@ actor AntigravityProvider: UsageProvider {
             // Same reasoning as Claude's: rejected but unexpired means the
             // account underneath has changed.
             AntigravityCredentials.forgetCached()
+            UserDefaults.standard.removeObject(forKey: "AntigravityEverBridged")
             throw UsageProviderError.needsAuth
         }
-        if status == 403 { throw UsageProviderError.needsAuth }
+        if status == 403 {
+            UserDefaults.standard.removeObject(forKey: "AntigravityEverBridged")
+            throw UsageProviderError.needsAuth
+        }
         if status == 429 {
             let retry = (response as? HTTPURLResponse)?
                 .value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
@@ -183,19 +202,28 @@ actor AntigravityProvider: UsageProvider {
     /// answer to fall back to.
     private func localQuota() async -> [LimitWindow]? {
         if let localQuotaOverride { return await localQuotaOverride() }
-        if let bridge, let windows = try? await AntigravityBridge.quota(
-            from: bridge, session: localSession
-        ), !windows.isEmpty {
-            return windows
+        if let bridge {
+            do {
+                let windows = try await AntigravityBridge.quota(from: bridge, session: localSession)
+                if !windows.isEmpty { return windows }
+            } catch {
+                Log.usage.error("Antigravity localQuota bridge error: \(String(describing: error), privacy: .public)")
+            }
         }
         // Cached endpoint gone or never found: the port changes every time
         // Antigravity restarts, so a stale one is expected, not exceptional.
         guard let fresh = AntigravityBridge.discover() else {
-            bridge = nil
+            self.bridge = nil
+            Log.usage.error("Antigravity localQuota discover failed to find process")
             return nil
         }
-        bridge = fresh
-        return try? await AntigravityBridge.quota(from: fresh, session: localSession)
+        self.bridge = fresh
+        do {
+            return try await AntigravityBridge.quota(from: fresh, session: localSession)
+        } catch {
+            Log.usage.error("Antigravity localQuota fresh bridge error: \(String(describing: error), privacy: .public)")
+            return nil
+        }
     }
 
     /// Ask for the account's quota, returning nil when it is not allowed to.

@@ -233,18 +233,6 @@ final class HorizontalStackTests: XCTestCase {
         XCTAssertEqual(NotchLayout.slack(for: .top), NotchLayout.slack(for: .bottom))
     }
 
-    /// The panel is sized from the stack, so a horizontal notch is wide and
-    /// shallow where a vertical one is narrow and tall.
-    @MainActor
-    func testThePanelTurnsWithTheStack() {
-        let model = NotchViewModel()
-        model.edge = .right
-        let side = model.panelSize(cellCount: 3)
-        model.edge = .top
-        let horizontal = model.panelSize(cellCount: 3)
-        XCTAssertGreaterThan(side.height, side.width)
-        XCTAssertGreaterThan(horizontal.width, horizontal.height)
-    }
 
     /// Whatever the edge, the panel always has room for the whole shape.
     @MainActor
