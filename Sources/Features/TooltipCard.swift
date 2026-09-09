@@ -288,27 +288,38 @@ private struct LimitWindowRow: View {
         window.resetsAt.map { ResetCopy.text(for: $0, now: now, format: resetTimeFormat) } ?? ""
     }
 
+    /// A count-only row (no fraction, no reset) — like Ollama's per-model request
+    /// counts — renders as a single table line: name left, count right.
+    private var isCountRow: Bool {
+        window.usedFraction == nil && window.used != nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SplitRow(leading: window.label, trailing: resetText)
+        if isCountRow {
+            SplitRow(leading: window.label, trailing: "\(window.used ?? 0)",
+                     trailingColor: Palette.textSecondary)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                SplitRow(leading: window.label, trailing: resetText)
 
-            // No bar without a denominator — an empty track would read as "none
-            // used", which is not what "we do not know the limit" means.
-            if window.usedFraction != nil {
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Palette.barTrack)
-                    Capsule().fill(band.color(accent: accentColor)).frame(width: fillWidth)
+                // No bar without a denominator — an empty track would read as "none
+                // used", which is not what "we do not know the limit" means.
+                if window.usedFraction != nil {
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Palette.barTrack)
+                        Capsule().fill(band.color(accent: accentColor)).frame(width: fillWidth)
+                    }
+                    .frame(width: trackWidth, height: NotchLayout.barHeight)
+                    .padding(.top, NotchLayout.labelToBar)
                 }
-                .frame(width: trackWidth, height: NotchLayout.barHeight)
-                .padding(.top, NotchLayout.labelToBar)
-            }
 
-            Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)\(paceText)")
-                .font(Typography.cardBody)
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .padding(.top, NotchLayout.barToUsed)
+                Text("\(window.usedFraction == nil ? "" : fidelity.qualifier)\(window.summary)\(paceText)")
+                    .font(Typography.cardBody)
+                    .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .padding(.top, NotchLayout.barToUsed)
+            }
         }
     }
 }
@@ -708,7 +719,8 @@ struct TooltipCard: View {
             sessionCap: sessionCap,
             statusMessage: snapshot.statusMessage,
             blockMessage: snapshot.block?.summary(now: now),
-            hasTokenUsage: snapshot.tokenUsage != nil
+            hasTokenUsage: snapshot.tokenUsage != nil,
+            compactRowCount: snapshot.compactRowCount
         )
     }
 

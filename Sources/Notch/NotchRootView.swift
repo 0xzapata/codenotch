@@ -226,7 +226,8 @@ struct NotchRootView: View {
                 sessionCount: model.activity(for: snapshot.id)?.sessions.count ?? 0,
                 sessionCap: model.sessionCap,
                 statusMessage: snapshot.statusMessage,
-                blockMessage: snapshot.block?.summary(now: model.now)
+                blockMessage: snapshot.block?.summary(now: model.now),
+                compactRowCount: snapshot.compactRowCount
             )
         // The ring it points at has moved with the notch, so the tail follows
         // it — but the card beyond the tail is drawn at its own size, and

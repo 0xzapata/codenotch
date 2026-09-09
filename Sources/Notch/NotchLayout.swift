@@ -286,7 +286,8 @@ enum NotchLayout {
                            sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
                            blockMessage: String? = nil,
-                           hasTokenUsage: Bool = false) -> CGFloat {
+                           hasTokenUsage: Bool = false,
+                           compactRowCount: Int = 0) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
         var height = 2 * cardPadding + header
 
@@ -297,9 +298,14 @@ enum NotchLayout {
         }
 
         if windowCount > 0 {
-            let block = 2 * cardBodyLineHeight + labelToBar + barHeight + barToUsed
+            let fullCount = windowCount - compactRowCount
+            // A full window row: label + bar + summary.
+            let fullBlock = 2 * cardBodyLineHeight + labelToBar + barHeight + barToUsed
+            // A compact (count-only) row: a single SplitRow line.
+            let compactBlock = cardBodyLineHeight
             height += headerToBlock
-                + CGFloat(windowCount) * block
+                + CGFloat(fullCount) * fullBlock
+                + CGFloat(compactRowCount) * compactBlock
                 + CGFloat(windowCount - 1) * blockSpacing
             if groupCount > 0 {
                 // Each group adds a title line, spacing (12), and 16px vertical padding inside the box
