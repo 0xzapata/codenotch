@@ -37,21 +37,57 @@ struct ClaudeProfile: Equatable, Hashable {
     /// Code has actually used, slugs in alphabetical order so the rings never
     /// swap places between launches.
     ///
-    /// "Actually used" is judged by the files Claude Code writes on its first
-    /// run — an empty directory, or a stray one someone made by hand, would
-    /// otherwise put a permanent "sign in" ring in the notch for an account
-    /// that does not exist.
+    /// "Actually used" is judged twice over. The files Claude Code writes on
+    /// its first run rule out an empty directory or a stray one someone made
+    /// by hand; a token filed under the directory's own service name rules out
+    /// everything else that has learned to live at `~/.claude-<slug>`.
+    ///
+    /// The second test is what keeps plugins out. `claude-mem` keeps its state
+    /// in `~/.claude-mem` and writes every one of the first-run names above, so
+    /// the filename rules pass it and it is not an account: Claude Code has
+    /// never signed in there and never will, so the ring could only ever read
+    /// "Sign in to Claude Code in ~/.claude-mem to read your usage" — advice
+    /// that cannot be followed, for a limit that does not exist. Filenames
+    /// alone cannot tell the two apart, and a denylist of plugin names would
+    /// only postpone the next one. The credential can: no token, no account,
+    /// no ring.
+    ///
+    /// `hasCredential` is injected so discovery stays testable — the real one
+    /// reads the login keychain, which a test has no business touching. It only
+    /// enumerates attributes and takes a persistent reference, neither of which
+    /// needs authorization, so this costs no extra prompt per candidate.
     static func discover(home: URL = homeDirectory,
-                         fileManager: FileManager = .default) -> [ClaudeProfile] {
+                         fileManager: FileManager = .default,
+                         hasCredential: (ClaudeProfile) -> Bool = Self.hasKeychainCredential)
+    -> [ClaudeProfile] {
         let names = (try? fileManager.contentsOfDirectory(atPath: home.path)) ?? []
         let extras = names.compactMap { name -> ClaudeProfile? in
             guard let slug = slug(fromDirectoryName: name) else { return nil }
             let directory = home.appendingPathComponent(name)
             guard isProfileDirectory(directory, fileManager: fileManager) else { return nil }
-            return ClaudeProfile(slug: slug, configDirectory: directory)
+            let candidate = ClaudeProfile(slug: slug, configDirectory: directory)
+            guard hasCredential(candidate) else {
+                Log.usage.debug("ignoring \(candidate.displayPath, privacy: .public): looks like a profile but has no token under \(candidate.keychainService, privacy: .public)")
+                return nil
+            }
+            return candidate
         }
         return [ClaudeProfile.default(home: home)]
             + extras.sorted { $0.slug! < $1.slug! }
+    }
+
+    /// Whether Claude Code has ever filed a token for this profile's directory.
+    ///
+    /// Asks across `keychainServices` rather than the primary name alone, so a
+    /// profile whose token was written under either spelling still counts.
+    ///
+    /// Deliberately not a check on whether that token is *valid*. An expired
+    /// one still means the account exists and the ring is worth drawing — the
+    /// provider degrades it to `credentialExpired` and shows the last reading
+    /// with its age, which is the right answer for a profile that has not been
+    /// used since the token last rotated.
+    static func hasKeychainCredential(_ profile: ClaudeProfile) -> Bool {
+        KeychainItem.newest(services: profile.keychainServices) != nil
     }
 
     /// `.claude-work` → `work`; anything else → nil. The bare `.claude` is the
