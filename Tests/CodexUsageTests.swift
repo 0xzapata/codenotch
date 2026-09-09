@@ -152,8 +152,8 @@ final class CodexUsageTests: XCTestCase {
                 + NotchLayout.codexMetricTop + NotchLayout.codexMetricHeight
                 + NotchLayout.codexMetricBottom
                 + NotchLayout.hairline
-                + 3 * NotchLayout.cardBodyLineHeight
-                + 2 * NotchLayout.codexUsageRowGap
+                + 2 * NotchLayout.cardBodyLineHeight
+                + NotchLayout.codexUsageRowGap
                 + NotchLayout.codexChartTop + NotchLayout.codexChartHeight,
             accuracy: 0.001
         )

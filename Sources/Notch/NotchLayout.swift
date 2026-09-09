@@ -310,8 +310,8 @@ enum NotchLayout {
             height += codexUsageTop + hairline + blockSpacing
                 + codexMetricTop + codexMetricHeight + codexMetricBottom
                 + hairline
-                + 3 * cardBodyLineHeight
-                + 2 * codexUsageRowGap
+                + 2 * cardBodyLineHeight
+                + codexUsageRowGap
                 + codexChartTop + codexChartHeight
         }
 

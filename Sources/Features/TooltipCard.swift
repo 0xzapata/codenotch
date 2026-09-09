@@ -450,10 +450,6 @@ private struct CodexUsageSection: View {
         usage.usageToday(now: now).map { UsageFormat.tokens($0) } ?? "Pending"
     }
 
-    private var peakText: String {
-        "peak \(UsageFormat.tokens(usage.peakDailyTokens))"
-    }
-
     private var metrics: [CodexMetric] {
         let summary = usage.summary
         return [
@@ -489,8 +485,6 @@ private struct CodexUsageSection: View {
                 .padding(.top, NotchLayout.blockSpacing)
             SplitRow(leading: "30-day tokens",
                      trailing: UsageFormat.tokens(usage.usageInLast30Days(now: now)))
-                .padding(.top, NotchLayout.codexUsageRowGap)
-            SplitRow(leading: "Daily tokens", trailing: peakText)
                 .padding(.top, NotchLayout.codexUsageRowGap)
             CodexDailyUsageChart(buckets: buckets, maximum: maximum)
                 .padding(.top, NotchLayout.codexChartTop)
