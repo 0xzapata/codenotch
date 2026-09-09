@@ -845,4 +845,45 @@ enum GlyphOutline {
             CGPoint(x: 0.93000, y: 0.46000),
         ],
     ]
+
+    static let ollama: [[CGPoint]] = [
+        [
+            CGPoint(x: 0.35, y: 0.12),
+            CGPoint(x: 0.40, y: 0.12),
+            CGPoint(x: 0.43, y: 0.22),
+            CGPoint(x: 0.50, y: 0.22),
+            CGPoint(x: 0.53, y: 0.12),
+            CGPoint(x: 0.58, y: 0.12),
+            CGPoint(x: 0.60, y: 0.23),
+            CGPoint(x: 0.62, y: 0.35),
+            CGPoint(x: 0.62, y: 0.50),
+            CGPoint(x: 0.72, y: 0.53),
+            CGPoint(x: 0.82, y: 0.55),
+            CGPoint(x: 0.88, y: 0.52),
+            CGPoint(x: 0.90, y: 0.56),
+            CGPoint(x: 0.86, y: 0.62),
+            CGPoint(x: 0.82, y: 0.70),
+            CGPoint(x: 0.80, y: 0.88),
+            CGPoint(x: 0.73, y: 0.88),
+            CGPoint(x: 0.74, y: 0.70),
+            CGPoint(x: 0.58, y: 0.70),
+            CGPoint(x: 0.48, y: 0.70),
+            CGPoint(x: 0.48, y: 0.88),
+            CGPoint(x: 0.41, y: 0.88),
+            CGPoint(x: 0.41, y: 0.58),
+            CGPoint(x: 0.38, y: 0.48),
+            CGPoint(x: 0.36, y: 0.36),
+            CGPoint(x: 0.22, y: 0.34),
+            CGPoint(x: 0.20, y: 0.28),
+            CGPoint(x: 0.24, y: 0.24),
+            CGPoint(x: 0.33, y: 0.22),
+            CGPoint(x: 0.35, y: 0.12),
+        ],
+        [
+            CGPoint(x: 0.32, y: 0.27),
+            CGPoint(x: 0.36, y: 0.27),
+            CGPoint(x: 0.36, y: 0.31),
+            CGPoint(x: 0.32, y: 0.31),
+        ]
+    ]
 }

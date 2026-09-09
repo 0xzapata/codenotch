@@ -88,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     + [AntigravityProvider(),
                        GLMProvider(), GrokLocalProvider(), OpenCodeProvider(),
                        CommandCodeProvider(), GitHubCopilotProvider(),
+                       OllamaLocalProvider(),
                        // A closure, not the value: the provider is an actor and
                        // re-reads the budget on every fetch, so a ceiling typed
                        // into Settings applies without a restart.
