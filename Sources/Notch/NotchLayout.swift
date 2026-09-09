@@ -138,6 +138,17 @@ enum NotchLayout {
     static let statusDotGap    = Design.px(11)
     static let hairline      = Design.px(2.5)  // rule above the session list
 
+    // Codex account activity
+    static let codexUsageTop   = Design.px(20)
+    static let codexMetricTop  = Design.px(14)
+    static let codexMetricRowGap = Design.px(8)
+    static let codexMetricRowHeight = Design.px(40)
+    static let codexMetricHeight = 5 * codexMetricRowHeight + 4 * codexMetricRowGap
+    static let codexMetricBottom = Design.px(14)
+    static let codexUsageRowGap = Design.px(12)
+    static let codexChartTop   = Design.px(15)
+    static let codexChartHeight = Design.px(115)
+
     /// The percent label's line box. Fixed rather than intrinsic so the panel
     /// geometry can be worked out in AppKit before SwiftUI lays anything out.
     static let percentLineHeight: CGFloat = {
@@ -274,7 +285,8 @@ enum NotchLayout {
     static func cardHeight(windowCount: Int, sessionCount: Int = 0,
                            sessionCap: Int = defaultSessionCap,
                            statusMessage: String? = nil,
-                           blockMessage: String? = nil) -> CGFloat {
+                           blockMessage: String? = nil,
+                           hasTokenUsage: Bool = false) -> CGFloat {
         let header = max(glyphSize, cardTitleLineHeight)
         var height = 2 * cardPadding + header
 
@@ -292,6 +304,15 @@ enum NotchLayout {
         } else {
             // The status message, at whatever height it actually wraps to.
             height += headerToBlock + bodyTextHeight(statusMessage ?? "")
+        }
+
+        if hasTokenUsage {
+            height += codexUsageTop + hairline + blockSpacing
+                + codexMetricTop + codexMetricHeight + codexMetricBottom
+                + hairline
+                + 3 * cardBodyLineHeight
+                + 2 * codexUsageRowGap
+                + codexChartTop + codexChartHeight
         }
 
         if sessionCount > 0 {
@@ -356,14 +377,16 @@ enum NotchLayout {
     /// is a sum of a dozen named parts, and an inverted copy of it would have
     /// to be kept in step by hand. The range is short enough that the search
     /// costs nothing.
-    static func sessionsFitting(cardBudget: CGFloat, windowCount: Int) -> Int {
+    static func sessionsFitting(cardBudget: CGFloat, windowCount: Int,
+                                hasTokenUsage: Bool = false) -> Int {
         var fits = 0
         for n in 1...sessionCeiling {
             // Costed as though something were still hidden, so that admitting
             // the nth row can never be what pushes the summary line off the
             // bottom of the card.
             let height = cardHeight(windowCount: windowCount,
-                                    sessionCount: n + 1, sessionCap: n)
+                                    sessionCount: n + 1, sessionCap: n,
+                                    hasTokenUsage: hasTokenUsage)
             guard height <= cardBudget else { break }
             fits = n
         }
@@ -384,9 +407,10 @@ enum NotchLayout {
     /// clicks through everywhere the chrome is not — but it cannot be so
     /// generous that the panel runs off the screen, which is what the cap is
     /// solved for.
-    static func maxCardHeight(sessionCap: Int) -> CGFloat {
+    static func maxCardHeight(sessionCap: Int, hasTokenUsage: Bool = false) -> CGFloat {
         cardHeight(windowCount: maxWindowCount,
-                   sessionCount: sessionCap + 1, sessionCap: sessionCap)
+                   sessionCount: sessionCap + 1, sessionCap: sessionCap,
+                   hasTokenUsage: hasTokenUsage)
     }
 
     static let defaultMaxCardHeight = maxCardHeight(sessionCap: defaultSessionCap)

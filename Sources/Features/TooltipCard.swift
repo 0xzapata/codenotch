@@ -336,6 +336,168 @@ private struct ProviderTooltip: View {
     }
 }
 
+private enum UsageFormat {
+    static func tokens(_ value: Int?) -> String {
+        guard let value else { return "—" }
+        switch value {
+        case 1_000_000_000...:
+            return String(format: "%.2fB", locale: Locale(identifier: "en_US_POSIX"),
+                          Double(value) / 1_000_000_000)
+        case 1_000_000...:
+            return String(format: "%.1fM", locale: Locale(identifier: "en_US_POSIX"),
+                          Double(value) / 1_000_000)
+        case 1_000...:
+            return String(format: "%.0fK", locale: Locale(identifier: "en_US_POSIX"),
+                          Double(value) / 1_000)
+        default:
+            return "\(value)"
+        }
+    }
+
+    static func duration(seconds: Double?) -> String {
+        guard let seconds, seconds.isFinite, seconds > 0 else { return "—" }
+        let minutes = max(1, Int((seconds / 60).rounded()))
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        if hours > 0 {
+            return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
+        }
+        return "\(minutes)m"
+    }
+
+    static func days(_ value: Int?) -> String {
+        guard let value else { return "—" }
+        return "\(value)d"
+    }
+}
+
+private struct CodexMetric: Identifiable {
+    let id: String
+    let value: String
+    let label: String
+}
+
+private struct CodexMetricList: View {
+    let metrics: [CodexMetric]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NotchLayout.codexMetricRowGap) {
+            ForEach(metrics) { metric in
+                HStack(alignment: .firstTextBaseline, spacing: Design.px(20)) {
+                    Text(metric.label)
+                        .font(Typography.cardBody)
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    Text(metric.value)
+                        .font(Typography.cardBody)
+                        .foregroundStyle(Palette.textSecondary)
+                        .lineLimit(1)
+                        .monospacedDigit()
+                }
+                .frame(height: NotchLayout.codexMetricRowHeight)
+            }
+        }
+        .frame(height: NotchLayout.codexMetricHeight)
+    }
+}
+
+private struct CodexDailyUsageChart: View {
+    let buckets: [CodexTokenUsage.DailyBucket]
+    let maximum: Int
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .bottomLeading) {
+                Rectangle()
+                    .fill(Palette.ringTrack)
+                    .frame(height: NotchLayout.hairline)
+
+                HStack(alignment: .bottom, spacing: Design.px(4)) {
+                    ForEach(buckets) { bucket in
+                        RoundedRectangle(cornerRadius: Design.px(3), style: .continuous)
+                            .fill(Palette.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: proxy.size.height
+                                   * CGFloat(bucket.tokens) / CGFloat(maximum))
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .frame(height: NotchLayout.codexChartHeight)
+        .clipped()
+    }
+}
+
+/// Account-wide Codex activity. Unlike the quota rows above, this is sourced
+/// from the Codex profile usage endpoint and is not a local estimate.
+private struct CodexUsageSection: View {
+    let usage: CodexTokenUsage
+    let now: Date
+
+    private var buckets: [CodexTokenUsage.DailyBucket] {
+        usage.last30Days(now: now)
+    }
+
+    private var maximum: Int {
+        max(1, buckets.map(\.tokens).max() ?? 0)
+    }
+
+    private var todayText: String {
+        usage.usageToday(now: now).map { UsageFormat.tokens($0) } ?? "Pending"
+    }
+
+    private var peakText: String {
+        "peak \(UsageFormat.tokens(usage.peakDailyTokens))"
+    }
+
+    private var metrics: [CodexMetric] {
+        let summary = usage.summary
+        return [
+            CodexMetric(id: "lifetime", value: UsageFormat.tokens(summary?.lifetimeTokens),
+                        label: "Lifetime tokens"),
+            CodexMetric(id: "peak", value: UsageFormat.tokens(summary?.peakDailyTokens),
+                        label: "Peak tokens"),
+            CodexMetric(id: "longest", value: UsageFormat.duration(
+                seconds: summary?.longestRunningTurnSeconds), label: "Longest chat"),
+            CodexMetric(id: "current-streak", value: UsageFormat.days(
+                summary?.currentStreakDays), label: "Current streak"),
+            CodexMetric(id: "longest-streak", value: UsageFormat.days(
+                summary?.longestStreakDays), label: "Longest streak")
+        ]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle()
+                .fill(Palette.ringTrack)
+                .frame(height: NotchLayout.hairline)
+                .padding(.top, NotchLayout.codexUsageTop)
+
+            CodexMetricList(metrics: metrics)
+                .padding(.top, NotchLayout.codexMetricTop)
+                .padding(.bottom, NotchLayout.codexMetricBottom)
+
+            Rectangle()
+                .fill(Palette.ringTrack)
+                .frame(height: NotchLayout.hairline)
+
+            SplitRow(leading: "Today", trailing: todayText)
+                .padding(.top, NotchLayout.blockSpacing)
+            SplitRow(leading: "30-day tokens",
+                     trailing: UsageFormat.tokens(usage.usageInLast30Days(now: now)))
+                .padding(.top, NotchLayout.codexUsageRowGap)
+            SplitRow(leading: "Daily tokens", trailing: peakText)
+                .padding(.top, NotchLayout.codexUsageRowGap)
+            CodexDailyUsageChart(buckets: buckets, maximum: maximum)
+                .padding(.top, NotchLayout.codexChartTop)
+        }
+    }
+}
+
 /// The line that says you are stopped.
 ///
 /// Deliberately loud where the rest of the card is quiet: it is the one thing
@@ -471,7 +633,8 @@ struct TooltipCard: View {
             sessionCount: activity?.sessions.count ?? 0,
             sessionCap: sessionCap,
             statusMessage: snapshot.statusMessage,
-            blockMessage: snapshot.block?.summary(now: now)
+            blockMessage: snapshot.block?.summary(now: now),
+            hasTokenUsage: snapshot.tokenUsage != nil
         )
     }
 
@@ -484,6 +647,9 @@ struct TooltipCard: View {
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 0) {
                     ProviderTooltip(snapshot: snapshot, now: now, resetTimeFormat: resetTimeFormat)
+                    if let tokenUsage = snapshot.tokenUsage {
+                        CodexUsageSection(usage: tokenUsage, now: now)
+                    }
                     if let activity {
                         SessionList(summary: activity, now: now, cap: sessionCap)
                     }
