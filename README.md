@@ -1,6 +1,6 @@
 <div align="center">
 
-# Codenotch
+![Codenotch](docs/design/codenotch-banner.png)
 
 [![CI](https://github.com/vinzdg/codenotch/actions/workflows/ci.yml/badge.svg)](https://github.com/vinzdg/codenotch/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-black)
