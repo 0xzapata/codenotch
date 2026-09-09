@@ -1,6 +1,9 @@
 import XCTest
 @testable import Codenotch
 
+// The monitor is `@MainActor`, so its statics cannot be reached from a
+// nonisolated synchronous test body.
+@MainActor
 final class OllamaActivityMonitorTests: XCTestCase {
     private let activeModelJSON = """
     {
