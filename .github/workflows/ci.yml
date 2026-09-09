@@ -26,6 +26,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Check local signing detection
+        run: bash Scripts/test-signing.sh
+
       # Unsigned on purpose: no identity exists on a runner, and the tests
       # read fixtures rather than keychains — see `make test-ci`.
       - name: Run unit tests
