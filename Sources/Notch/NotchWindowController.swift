@@ -151,7 +151,8 @@ final class NotchWindowController {
         let size = model.panelSize(cellCount: cellCount ?? model.snapshots.count)
         let frame = NotchGeometry.panelFrame(
             for: screen, panelSize: size, edge: model.edge,
-            alongOffset: model.alongOffset, slack: model.slack
+            alongOffset: model.alongOffset, slack: model.slack,
+            trailingExtent: model.trailingExtent
         )
         lastVisibleFrame = screen.visibleFrame
 
