@@ -22,6 +22,7 @@ struct ProviderRing: View {
     var isRefreshing: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.codenotchReduceTransparency) private var reduceTransparency
     @Environment(\.codenotchAccentColor) private var accentColor
     @State private var spin: Double = 0
 
@@ -61,9 +62,10 @@ struct ProviderRing: View {
                 ProviderGlyphView(glyph: glyph)
                     .foregroundStyle(Palette.textPrimary)
                     // A spent limit dims its glyph so the ring reads as "waiting".
-                    .opacity(band == .exhausted ? 0.35 : 1)
+                    // Under reduce-transparency, boost opacity so it stays legible without low alpha.
+                    .opacity(band == .exhausted ? (reduceTransparency ? 0.7 : 0.35) : 1)
             }
-            .opacity(isStale ? 0.45 : 1)
+            .opacity(isStale ? (reduceTransparency ? 0.75 : 0.45) : 1)
 
             if let activity, activity.state != .idle {
                 ActivityArc(summary: activity)
@@ -101,6 +103,7 @@ private struct ActivityArc: View {
     let summary: ActivitySummary
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.codenotchReduceTransparency) private var reduceTransparency
     @State private var spinning = false
     @State private var pulsing = false
 
@@ -144,7 +147,7 @@ private struct ActivityArc: View {
         Circle()
             .inset(by: inset)
             .stroke(summary.color, lineWidth: NotchLayout.activityStroke)
-            .opacity(pulsing ? 0.3 : 1)
+            .opacity(pulsing ? (reduceTransparency ? 0.65 : 0.3) : 1)
             .onAppear {
                 guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
