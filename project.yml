@@ -57,6 +57,11 @@ targets:
         CFBundleName: Codenotch
         CFBundleDisplayName: Codenotch
         LSMinimumSystemVersion: "15.0"
+        # A router is often on a LAN box over plain http; ATS already exempts
+        # loopback, this extends the exemption to local addresses only, and
+        # leaves every public host on https.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         # Sources/Info.plist is *generated* from this block, so editing that
         # file directly is undone by the next `make gen`. Pointing both at the
         # build settings keeps one place to bump.

@@ -36,6 +36,8 @@ A Windows port — Rust/Tauri 2, same design and providers — lives in [`window
 | **OpenCode** | official | The Go plan's official usage endpoint, with the `opencode-go` key OpenCode itself stores on sign-in. |
 | **Command Code** | official | The GOAT plan's `/alpha` billing endpoints, with the key the Command Code app writes to `~/.commandcode/auth.json`. |
 | **GitHub Copilot** | official | GitHub's Copilot quota endpoint, authenticated with the GitHub CLI session already on the Mac (`gh auth login`). |
+| **9router** | official | One upstream provider you pick in Settings, every account of it connected in a self-hosted [9router](https://github.com/decolua/9router) summed into one ring, read through its dashboard API at the URL you enter. The CLI token is borrowed from `~/.9router` when the router runs on this Mac; otherwise paste one. |
+| **OmniRoute** | official | The same, for a self-hosted [OmniRoute](https://github.com/diegosouzapw/OmniRoute), read through its management API at the URL you enter in Settings with an `oma_live_…` access token or a `manage`-scoped API key. |
 
 Codenotch never signs in anywhere. Every reading is borrowed from a credential
 or session a tool on your Mac already holds — install and sign in to any of

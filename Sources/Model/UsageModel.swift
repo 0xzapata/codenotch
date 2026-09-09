@@ -245,6 +245,8 @@ struct ProviderSnapshot: Identifiable, Equatable {
         // one wants a key, the local one wants the daemon running.
         case "ollama":       return "Enter an Ollama API key in Settings, or export OLLAMA_API_KEY"
         case "ollama-local": return "Start Ollama to monitor your local models"
+        case "9router", "omniroute":
+            return "Enter the \(displayName) URL and token in Settings, and make sure it is running"
         default:           return "Sign in to \(displayName) to read your usage"
         }
     }

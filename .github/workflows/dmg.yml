@@ -1,0 +1,33 @@
+name: DMG
+
+# Manual only. Builds an unsigned, un-notarized drag-to-Applications image
+# from the current branch and uploads it as a workflow artifact. Nothing here
+# touches the maintainer's Developer ID or the Sparkle appcast.
+on:
+  workflow_dispatch:
+
+jobs:
+  dmg:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: make test-ci
+      - name: Build Release (ad-hoc signed)
+        run: |
+          xcodegen generate
+          xcodebuild -project Codenotch.xcodeproj -scheme Codenotch -configuration Release \
+            -destination 'platform=macOS' -derivedDataPath build/dd \
+            CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="" \
+            build | tail -20
+      - name: Package
+        run: |
+          mkdir -p build/stage
+          cp -R build/dd/Build/Products/Release/Codenotch.app build/stage/
+          ln -s /Applications build/stage/Applications
+          hdiutil create -volname Codenotch -srcfolder build/stage -ov -format UDZO build/Codenotch-unsigned.dmg
+          shasum -a 256 build/Codenotch-unsigned.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Codenotch-unsigned-dmg
+          path: build/Codenotch-unsigned.dmg
