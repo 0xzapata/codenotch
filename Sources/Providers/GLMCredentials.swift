@@ -135,7 +135,7 @@ enum GLMCredentials {
     // MARK: OpenCode
 
     /// The provider names OpenCode's own sign-in writes, most specific first.
-    private static let openCodeProviderIDs = ["zai-coding-plan", "zai", "z-ai", "z.ai", "zhipu", "zhipuai"]
+    private static let openCodeProviderIDs = ["zai-coding-plan", "zai", "z-ai", "z.ai", "glm", "zhipu", "zhipuai"]
 
     static func openCode(_ url: URL) -> Credential? {
         guard let root = dictionary(at: url) else { return nil }
