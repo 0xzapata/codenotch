@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// provider and a session monitor of its own, keyed by the same id, so a
     /// work login's sessions spin the work ring and nobody else's.
     private let claudeProfiles = ClaudeProfile.discover()
+    private let codexProfiles = CodexProfile.discover()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Set here, not in the Info.plist: this call is applied at launch and
@@ -79,9 +80,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // it drew every provider from the archive and only dropped the
             // switched-off ones once the binding below delivered.
             Log.usage.info("claude profiles: \(self.claudeProfiles.map(\.displayPath).joined(separator: ", "), privacy: .public)")
+            Log.usage.info("codex profiles: \(self.codexProfiles.map(\.displayPath).joined(separator: ", "), privacy: .public)")
             let store = UsageStore(
                 providers: claudeProfiles.map { ClaudeOAuthProvider(profile: $0) }
-                    + [CursorLocalProvider(), CodexLocalProvider(), AntigravityProvider(),
+                    + [CursorLocalProvider()]
+                    + codexProfiles.map { CodexLocalProvider(profile: $0) }
+                    + [AntigravityProvider(),
                        GLMProvider(), GrokLocalProvider(), OpenCodeProvider(),
                        GitHubCopilotProvider(),
                        // A closure, not the value: the provider is an actor and
@@ -263,13 +267,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // still working without you switching to it.
         var monitors: [String: any AgentActivityMonitor] = [
             "cursor": CursorActivityMonitor(),
-            "codex": CodexActivityMonitor(),
             "gemini": AntigravityActivityMonitor(),
             "grok": GrokActivityMonitor(),
             "gemini-api": GeminiCLIActivityMonitor()
         ]
         for profile in claudeProfiles {
             monitors[profile.id] = ClaudeSessionMonitor(directory: profile.sessionsDirectory)
+        }
+        for profile in codexProfiles {
+            monitors[profile.id] = CodexActivityMonitor(profile: profile)
         }
         for (id, monitor) in monitors {
             monitor.sessionsPublisher

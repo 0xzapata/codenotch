@@ -21,19 +21,22 @@ final class CodexActivityMonitor: ObservableObject, AgentActivityMonitor {
 
     private let stateStore: URL
     private let desktopStore: URL
+    private let profile: CodexProfile
     private let interval: TimeInterval
     /// How long after the last write a turn is still considered in flight.
     private let staleAfter: TimeInterval
     private var timer: Timer?
 
     init(
-        stateStore: URL = CodexStore.stateURL,
-        desktopStore: URL = CodexStore.desktopStoreURL,
+        profile: CodexProfile = .default(),
+        stateStore: URL? = nil,
+        desktopStore: URL? = nil,
         interval: TimeInterval = 2,
         staleAfter: TimeInterval = 8
     ) {
-        self.stateStore = stateStore
-        self.desktopStore = desktopStore
+        self.profile = profile
+        self.stateStore = stateStore ?? profile.stateURL
+        self.desktopStore = desktopStore ?? profile.desktopStoreURL
         self.interval = interval
         self.staleAfter = staleAfter
     }
@@ -54,13 +57,14 @@ final class CodexActivityMonitor: ObservableObject, AgentActivityMonitor {
 
     private func rescan() {
         let found = Self.read(stateStore: stateStore, desktopStore: desktopStore,
-                              staleAfter: staleAfter)
+                              staleAfter: staleAfter, profile: profile)
         guard found != sessions else { return }
         sessions = found
     }
 
     static func read(stateStore: URL, desktopStore: URL,
-                     staleAfter: TimeInterval, now: Date = Date()) -> [AgentSession] {
+                     staleAfter: TimeInterval, now: Date = Date(),
+                     profile: CodexProfile = .default()) -> [AgentSession] {
         // Both surfaces, because "Codex" is two programs that record their work
         // in different places: the CLI and the VS Code extension append to a
         // rollout, and the desktop app writes to its own catalogue. Whichever
@@ -70,11 +74,11 @@ final class CodexActivityMonitor: ObservableObject, AgentActivityMonitor {
         if let rollout = CodexStore.newestRollout(in: stateStore),
            let modified = (try? FileManager.default
                .attributesOfItem(atPath: rollout.path))?[.modificationDate] as? Date {
-            candidates.append((id: "codex.\(rollout.lastPathComponent)",
-                               name: "Codex", at: modified))
+            candidates.append((id: "\(profile.id).\(rollout.lastPathComponent)",
+                               name: profile.displayName, at: modified))
         }
         if let desktop = CodexStore.newestDesktopThread(in: desktopStore) {
-            candidates.append((id: "codex.desktop", name: desktop.title,
+            candidates.append((id: "\(profile.id).desktop", name: desktop.title,
                                at: desktop.updatedAt))
         }
 

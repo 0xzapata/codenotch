@@ -60,6 +60,31 @@ Any `~/.claude-<slug>` directory Claude Code has run against is found at launch;
 the default `~/.claude` always comes first, the rest in alphabetical order, so the
 rings never swap places.
 
+Codex accounts work the same way: `~/.codex` stays the **Codex** ring, and each
+used `~/.codex-<slug>` directory adds a **Codex (slug)** ring with its own limits,
+activity and Settings row. Profiles are discovered at launch, default first,
+then alphabetically. To connect a second account, sign in through Codex CLI
+using a separate home directory:
+
+```sh
+mkdir -p "$HOME/.codex-work"
+CODEX_HOME="$HOME/.codex-work" codex -c 'cli_auth_credentials_store="file"' login
+```
+
+Choose the second account during sign-in, then restart Codenotch. Run that
+account's CLI sessions with `CODEX_HOME="$HOME/.codex-work" codex` as well.
+Repeat with another name, such as `.codex-personal`, for more accounts.
+Settings shows each account's email and profile directory; each ring can be
+reordered or switched off independently. Switching one off forgets only its
+Codenotch readings and leaves the Codex login intact.
+
+Codenotch reads each profile's `auth.json`; keychain-only or API-key-only
+logins cannot provide these ChatGPT account limits. It never copies, refreshes
+or writes Codex credentials. If a login expires, use that profile's Codex CLI
+to renew it. Directories outside the `~/.codex-<slug>` convention are not
+discovered automatically, and adding a profile requires restarting Codenotch,
+just as it does for Claude.
+
 ## When a session ends
 
 The notch opens itself for five seconds when an agent stops working, or stops
