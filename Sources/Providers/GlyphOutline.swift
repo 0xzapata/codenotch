@@ -530,6 +530,24 @@ enum GlyphOutline {
          CGPoint(x: 0.7500, y: 0.9600), CGPoint(x: 0.1500, y: 0.9600)]
     ]
 
+    /// Command Code's mark is the macOS command key — four loops around a
+    /// cross. Geometric, not traced: their SVG is that symbol, and a screenshot
+    /// trace would be worse than a readable glyph at 16pt.
+    static let commandcode: [[CGPoint]] = [
+        [CGPoint(x: 0.12, y: 0.12), CGPoint(x: 0.32, y: 0.12),
+         CGPoint(x: 0.32, y: 0.32), CGPoint(x: 0.12, y: 0.32)],
+        [CGPoint(x: 0.68, y: 0.12), CGPoint(x: 0.88, y: 0.12),
+         CGPoint(x: 0.88, y: 0.32), CGPoint(x: 0.68, y: 0.32)],
+        [CGPoint(x: 0.12, y: 0.68), CGPoint(x: 0.32, y: 0.68),
+         CGPoint(x: 0.32, y: 0.88), CGPoint(x: 0.12, y: 0.88)],
+        [CGPoint(x: 0.68, y: 0.68), CGPoint(x: 0.88, y: 0.68),
+         CGPoint(x: 0.88, y: 0.88), CGPoint(x: 0.68, y: 0.88)],
+        [CGPoint(x: 0.22, y: 0.42), CGPoint(x: 0.78, y: 0.42),
+         CGPoint(x: 0.78, y: 0.58), CGPoint(x: 0.22, y: 0.58)],
+        [CGPoint(x: 0.42, y: 0.22), CGPoint(x: 0.58, y: 0.22),
+         CGPoint(x: 0.58, y: 0.78), CGPoint(x: 0.42, y: 0.78)]
+    ]
+
     /// GitHub Copilot's own mark, traced from its icon.
     static let copilot: [[CGPoint]] = [
         [

@@ -87,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     + codexProfiles.map { CodexLocalProvider(profile: $0) }
                     + [AntigravityProvider(),
                        GLMProvider(), GrokLocalProvider(), OpenCodeProvider(),
-                       GitHubCopilotProvider(),
+                       CommandCodeProvider(), GitHubCopilotProvider(),
                        // A closure, not the value: the provider is an actor and
                        // re-reads the budget on every fetch, so a ceiling typed
                        // into Settings applies without a restart.
