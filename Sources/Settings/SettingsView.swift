@@ -254,6 +254,10 @@ struct SettingsView: View {
         // sidebar on this OS — not a flat tint over the window's material.
         // Under reduce-transparency, swap to an opaque solid card with an explicit border.
         .background {
+            // Reduce-transparency wins outright: it is a request for no
+            // see-through surface at all, which neither glass nor a material
+            // would honour. Only past that does the OS decide which of the
+            // two translucent treatments it can actually draw.
             if reduceTransparency {
                 RoundedRectangle(cornerRadius: SettingsView.sidebarCornerRadius,
                                  style: .continuous)
@@ -263,12 +267,16 @@ struct SettingsView: View {
                                          style: .continuous)
                             .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
                     )
-            } else {
+            } else if #available(macOS 26.0, *) {
                 Color.clear.glassEffect(
                     .regular,
                     in: RoundedRectangle(cornerRadius: SettingsView.sidebarCornerRadius,
                                          style: .continuous)
                 )
+            } else {
+                RoundedRectangle(cornerRadius: SettingsView.sidebarCornerRadius,
+                                 style: .continuous)
+                    .fill(.regularMaterial)
             }
         }
         .padding(SettingsView.sidebarInset)
@@ -305,8 +313,10 @@ struct SettingsView: View {
                         Circle()
                             .fill(Color(nsColor: .controlBackgroundColor))
                             .overlay(Circle().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1))
-                    } else {
+                    } else if #available(macOS 26.0, *) {
                         Color.clear.glassEffect(.regular, in: Circle())
+                    } else {
+                        Circle().fill(.regularMaterial)
                     }
                 }
                 .contentShape(Circle())
