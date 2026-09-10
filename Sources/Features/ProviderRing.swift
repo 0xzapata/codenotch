@@ -50,9 +50,12 @@ struct ProviderRing: View {
                 Circle()
                     .strokeBorder(Palette.ringTrack, lineWidth: NotchLayout.trackStroke)
 
+                // Alone, the arc runs down the middle of the track; paired
+                // with a weekly, it moves to the outer half so the two sit
+                // side by side at the same weight.
                 if usedFraction != nil {
                     Circle()
-                        .inset(by: NotchLayout.trackStroke / 2)
+                        .inset(by: secondaryFraction == nil ? NotchLayout.trackStroke / 2 : NotchLayout.progressStroke / 2)
                         .trim(from: 0, to: sweep)
                         .stroke(
                             band.color(accent: accentColor),
@@ -69,9 +72,9 @@ struct ProviderRing: View {
                         .animation(NotchMotion.reading, value: band)
                 }
 
-                // Same weight as the session arc, one step in. ponytail: one
-                // fixed blue, whatever the weekly band; colour it by band too
-                // if a blue arc at 95% ever reads as calm.
+                // Same weight as the session arc, on the inner half of the
+                // track. ponytail: one fixed blue, whatever the weekly band;
+                // colour it by band too if a blue arc at 95% ever reads as calm.
                 if secondaryFraction != nil {
                     Circle()
                         .inset(by: (NotchLayout.ringDiameter - NotchLayout.secondaryDiameter) / 2)
