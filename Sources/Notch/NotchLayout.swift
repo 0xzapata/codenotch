@@ -55,10 +55,16 @@ enum NotchLayout {
     static let glyphSize     = Design.px(46)
     static let ringLabelGap  = Design.px(26.9)
 
+    // The second window's arc — weekly inside session — just inside the track
+    // (inner edge 86px across), thinner than the main arc so it reads as the
+    // lesser figure.
+    static let secondaryDiameter = Design.px(80)
+    static let secondaryStroke   = Design.px(4.5)
+
     // The activity indicator. Not in the design frame — sized to sit in the gap
-    // between the glyph (46px across) and the inside edge of the track (86px),
-    // so it never crowds either.
-    static let activityDiameter = Design.px(72)
+    // between the glyph (46px across) and the secondary arc (80px), so it
+    // never crowds either.
+    static let activityDiameter = Design.px(66)
     static let activityStroke   = Design.px(5.5)
 
     // The settings orb: it lives *below* the notch, not inside it. At rest only

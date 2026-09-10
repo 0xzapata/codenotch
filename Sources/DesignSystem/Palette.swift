@@ -13,6 +13,7 @@ enum Palette {
     static let ample         = Color(hex: 0x00FF88)           // green
     static let watch         = Color(hex: 0xF2FF00)           // yellow
     static let critical      = Color(hex: 0xFF3F00)           // orange
+    static let secondary     = Color(hex: 0x4DA3FF)           // blue, the inner arc
 
     static let textPrimary   = Color.white
     static let textSecondary = Color(hex: 0x808080)

@@ -32,12 +32,30 @@ enum RouterCredentials {
     }
 
     static func baseURL(_ kind: RouterKind, defaults: UserDefaults = .standard) -> URL? {
-        let stored = defaults.string(forKey: baseURLKey(kind)) ?? ""
+        let stored = (defaults.string(forKey: baseURLKey(kind)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let text = stored.isEmpty ? kind.defaultBaseURL : stored
-        guard let url = URL(string: text), let scheme = url.scheme,
-              ["http", "https"].contains(scheme), url.host != nil
+        guard var parts = URLComponents(string: text), let scheme = parts.scheme,
+              ["http", "https"].contains(scheme), let host = parts.host, !host.isEmpty
         else { return nil }
-        return url
+        // App Transport Security refuses cleartext to a public host outright,
+        // before any redirect to https could rescue it. A router on the open
+        // internet is on https anyway, so "http://9router.example.com" is
+        // taken as a slip and upgraded; addresses and local names stay as
+        // typed, since that is where a router really does speak http.
+        if scheme == "http", isPublicName(host) {
+            parts.scheme = "https"
+            if parts.port == 80 { parts.port = nil }
+        }
+        return parts.url
+    }
+
+    /// A fully qualified name on the public internet: has a dot, is not an IP
+    /// address, and is not `.local`.
+    static func isPublicName(_ host: String) -> Bool {
+        let lower = host.lowercased()
+        guard lower.contains("."), !lower.hasSuffix(".local") else { return false }
+        return lower.rangeOfCharacter(from: CharacterSet(charactersIn: "0123456789.:").inverted) != nil
     }
 
     /// Whether anything was set up at all. A typed URL counts even without a

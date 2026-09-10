@@ -200,6 +200,13 @@ struct ProviderSnapshot: Identifiable, Equatable {
 
     var usedFraction: Double? { headline?.usedFraction }
 
+    /// The next metered window after the headline — Claude's weekly beside its
+    /// session — drawn as a thinner arc inside the main one. Nil when the
+    /// provider meters one window, or none with a denominator.
+    var secondaryFraction: Double? {
+        windows.first { $0.id != headline?.id && $0.usedFraction != nil }?.usedFraction
+    }
+
     /// What the cell prints under the ring: the spent end by default, or the
     /// other end of the same figure when the ring counts down. The halves are
     /// rounded as a pair so "12%" flips to "88%", never "87%".

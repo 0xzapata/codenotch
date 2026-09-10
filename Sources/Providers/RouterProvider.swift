@@ -46,14 +46,15 @@ actor RouterProvider: UsageProvider {
     }
 
     func fetchSnapshot() async throws -> ProviderSnapshot {
-        guard let base = RouterCredentials.baseURL(kind) else { throw UsageProviderError.needsAuth }
+        guard let typed = RouterCredentials.baseURL(kind) else { throw UsageProviderError.needsAuth }
         let token = RouterCredentials.token(kind)
-        authBase = base
+        authBase = typed
         loginTried = false
 
         let connections = try RouterUsage.parseConnections(
-            try await get(RouterUsage.connectionsURL(base: base, kind: kind), token: token)
+            try await get(RouterUsage.connectionsURL(base: typed, kind: kind), token: token)
         )
+        let base = typed
 
         var known: [String] = []
         for c in connections where !known.contains(c.provider) { known.append(c.provider) }

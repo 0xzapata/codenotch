@@ -66,6 +66,17 @@ final class NotchLayoutTests: XCTestCase {
         XCTAssertGreaterThan(innerEdge, NotchLayout.glyphSize / 2)
     }
 
+    /// The weekly arc sits between the activity ring and the track, touching
+    /// neither, and inside the main arc's inner edge.
+    func testSecondaryArcClearsTheActivityRingAndTheTrack() {
+        let outer = NotchLayout.secondaryDiameter / 2 + NotchLayout.secondaryStroke / 2
+        let inner = NotchLayout.secondaryDiameter / 2 - NotchLayout.secondaryStroke / 2
+        let trackInnerEdge = NotchLayout.ringDiameter / 2 - NotchLayout.trackStroke
+        let activityOuterEdge = NotchLayout.activityDiameter / 2 + NotchLayout.activityStroke / 2
+        XCTAssertLessThanOrEqual(outer, trackInnerEdge)
+        XCTAssertGreaterThan(inner, activityOuterEdge)
+    }
+
     /// Every cell's tooltip has to fit inside the panel, or the card would be
     /// clipped for the first and last providers.
     func testTooltipFitsThePanelForEveryCell() {

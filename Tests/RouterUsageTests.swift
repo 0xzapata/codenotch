@@ -55,6 +55,26 @@ final class RouterUsageTests: XCTestCase {
         XCTAssertEqual(body, ["password": "pw "])
     }
 
+    /// Cleartext to a public name is upgraded (ATS would refuse it anyway);
+    /// addresses and local names are left alone.
+    func testHTTPToAPublicNameIsUpgraded() {
+        let d = UserDefaults(suiteName: "router-url-test")!
+        d.removePersistentDomain(forName: "router-url-test")
+        for (typed, expected) in [
+            ("http://9router.example.com", "https://9router.example.com"),
+            ("http://9router.example.com:80/x", "https://9router.example.com/x"),
+            ("http://192.168.1.20:20128", "http://192.168.1.20:20128"),
+            ("http://mini.local:20128", "http://mini.local:20128"),
+            ("http://localhost:20128", "http://localhost:20128"),
+            (" https://a.b/ ", "https://a.b/"),
+        ] {
+            d.set(typed, forKey: RouterCredentials.baseURLKey(.nineRouter))
+            XCTAssertEqual(RouterCredentials.baseURL(.nineRouter, defaults: d)?.absoluteString, expected, typed)
+        }
+        d.set("ftp://x.y", forKey: RouterCredentials.baseURLKey(.nineRouter))
+        XCTAssertNil(RouterCredentials.baseURL(.nineRouter, defaults: d))
+    }
+
     func testListingURLPerRouter() {
         let base = URL(string: "https://host/9r")!
         XCTAssertEqual(RouterUsage.connectionsURL(base: base, kind: .nineRouter).absoluteString,
