@@ -45,7 +45,7 @@ actor RouterProvider: UsageProvider {
         let token = RouterCredentials.token(kind)
 
         let connections = try RouterUsage.parseConnections(
-            try await get(base.appendingPathComponent("api/providers"), token: token)
+            try await get(RouterUsage.connectionsURL(base: base, kind: kind), token: token)
         )
 
         var known: [String] = []
@@ -108,7 +108,9 @@ actor RouterProvider: UsageProvider {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401 || status == 403 { throw UsageProviderError.needsAuth }
         guard (200..<300).contains(status) else { throw UsageProviderError.badResponse(status: status) }
-        Log.usage.debug("\(self.kind.id, privacy: .public) \(url.path, privacy: .public) -> \(String(decoding: data.prefix(600), as: UTF8.self), privacy: .public)")
+        // Bodies stay out of the log: the listing carries client secrets
+        // and OmniRoute's carries masked keys; the shape is covered by tests.
+        Log.usage.debug("\(self.kind.id, privacy: .public) \(url.path, privacy: .public) -> \(data.count) bytes")
         return data
     }
 

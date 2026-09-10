@@ -14,18 +14,29 @@ struct RouterKind: Equatable {
     let defaultBaseURL: String
     /// Where the router keeps its data directory, for the borrowed CLI token.
     let dataDirectory: String?
+    /// Which listing to read. 9router's `/api/providers` blanks four token
+    /// fields but leaves `providerSpecificData` (client secrets, cookies)
+    /// intact; its `/api/providers/client` is an allow-list and flags which
+    /// connections can report usage. OmniRoute's `client` route is the
+    /// opposite — it returns every token on purpose, for cloud sync — so it
+    /// reads the plain listing, which masks keys.
+    let connectionsPath: String
+    let connectionsQuery: [URLQueryItem]
 
     /// https://github.com/decolua/9router — `x-9r-cli-token` or a dashboard
     /// JWT gates `/api/usage`; the CLI token can be derived from `~/.9router`.
     static let nineRouter = RouterKind(
         id: "9router", displayName: "9router", glyph: .nineRouter,
-        defaultBaseURL: "http://127.0.0.1:20128", dataDirectory: ".9router"
+        defaultBaseURL: "http://127.0.0.1:20128", dataDirectory: ".9router",
+        // ponytail: one page of 500 — the route's ceiling; page when a router holds more.
+        connectionsPath: "api/providers/client", connectionsQuery: [URLQueryItem(name: "pageSize", value: "500")]
     )
     /// https://github.com/diegosouzapw/OmniRoute — `/api/usage` is a management
     /// route: `Authorization: Bearer oma_live_…` or a `manage`-scoped `sk-` key.
     static let omniRoute = RouterKind(
         id: "omniroute", displayName: "OmniRoute", glyph: .omniRoute,
-        defaultBaseURL: "http://127.0.0.1:20128", dataDirectory: nil
+        defaultBaseURL: "http://127.0.0.1:20128", dataDirectory: nil,
+        connectionsPath: "api/providers", connectionsQuery: []
     )
 }
 
@@ -53,6 +64,14 @@ enum RouterUsage {
         let id: String
         let provider: String
         let name: String
+    }
+
+    /// The listing URL for one router, base path kept (`https://host/9r` stays
+    /// under `/9r`) and the query added only where the route takes one.
+    static func connectionsURL(base: URL, kind: RouterKind) -> URL {
+        var parts = URLComponents(url: base.appendingPathComponent(kind.connectionsPath), resolvingAgainstBaseURL: false)!
+        parts.queryItems = kind.connectionsQuery.isEmpty ? nil : kind.connectionsQuery
+        return parts.url!
     }
 
     static func parseConnections(_ data: Data) throws -> [Connection] {

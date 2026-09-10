@@ -37,6 +37,23 @@ final class RouterUsageTests: XCTestCase {
         XCTAssertEqual(list[1].name, "me@x.com")
     }
 
+    /// 9router's allow-listed `client` route wraps the same list in paging.
+    func testClientRouteShapeParses() {
+        let paged = Data("""
+        { "connections": [ { "id": "c9", "provider": "codex", "name": "me@x.com", "isActive": true } ],
+          "providerOptions": ["codex"], "pagination": { "page": 1, "pageSize": 500, "total": 1 } }
+        """.utf8)
+        XCTAssertEqual(try RouterUsage.parseConnections(paged), [.init(id: "c9", provider: "codex", name: "me@x.com")])
+    }
+
+    func testListingURLPerRouter() {
+        let base = URL(string: "https://host/9r")!
+        XCTAssertEqual(RouterUsage.connectionsURL(base: base, kind: .nineRouter).absoluteString,
+                       "https://host/9r/api/providers/client?pageSize=500")
+        XCTAssertEqual(RouterUsage.connectionsURL(base: base, kind: .omniRoute).absoluteString,
+                       "https://host/9r/api/providers")
+    }
+
     func testConnectionsGarbageThrows() {
         XCTAssertThrowsError(try RouterUsage.parseConnections(Data("[]".utf8)))
     }
