@@ -1462,9 +1462,16 @@ private struct RouterEntry: View {
         return list
     }
 
+    private var tokenHint: String {
+        kind.id == "9router"
+            ? "Optional on this Mac: read from ~/.9router when empty."
+            : "Access token or manage-scoped API key."
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
+            GridRow {
+                Text("Router URL")
                 TextField(kind.defaultBaseURL, text: $baseURL)
                     .textFieldStyle(.roundedBorder)
                     .controlSize(.small)
@@ -1474,37 +1481,48 @@ private struct RouterEntry: View {
             }
             // The ring shows one upstream provider, all of its accounts summed.
             // The provider re-reads this on every fetch, so no restart.
-            HStack(spacing: 6) {
-                Text("Show")
-                Picker("", selection: $selected) {
-                    Text("First listed").tag("")
-                    ForEach(choices, id: \.self) { Text($0).tag($0) }
-                }
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(width: 140)
-                .onChange(of: selected) { _ = signIn(kind.id) }
-                Text("summed across its accounts")
-            }
-            .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                SecureField(kind.id == "9router" ? "CLI token (optional on this Mac)" : "Access token or manage-scoped API key",
-                            text: $token)
-                    .textContentType(.password)
-                    .textFieldStyle(.roundedBorder)
+            GridRow {
+                Text("Show provider")
+                HStack(spacing: 6) {
+                    Picker("Show provider", selection: $selected) {
+                        Text("First listed").tag("")
+                        ForEach(choices, id: \.self) { Text($0).tag($0) }
+                    }
+                    .labelsHidden()
                     .controlSize(.small)
-                Button("Save") {
-                    guard !token.isEmpty else { return }
-                    RouterCredentials.store(token, for: kind)
-                    token = ""
-                    saved = true
-                    _ = signIn(kind.id)
+                    .frame(width: 140)
+                    .onChange(of: selected) { _ = signIn(kind.id) }
+                    Text("limits summed across its accounts")
+                        .foregroundStyle(.secondary)
                 }
-                .controlSize(.small)
-                .disabled(token.isEmpty)
-                if saved {
-                    Text("Saved.").foregroundStyle(.green).controlSize(.small)
+            }
+            GridRow {
+                Text("Token")
+                HStack(spacing: 8) {
+                    SecureField("Token", text: $token)
+                        .labelsHidden()
+                        .textContentType(.password)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                    Button("Save") {
+                        guard !token.isEmpty else { return }
+                        RouterCredentials.store(token, for: kind)
+                        token = ""
+                        saved = true
+                        _ = signIn(kind.id)
+                    }
+                    .controlSize(.small)
+                    .disabled(token.isEmpty)
+                    if saved {
+                        Text("Saved.").foregroundStyle(.green).controlSize(.small)
+                    }
                 }
+            }
+            GridRow {
+                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                Text(tokenHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
