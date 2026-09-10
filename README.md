@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **A macOS app that pins a small black notch to a screen edge, showing how much
-of each coding assistant's usage limit you have burned — and whether it is
+of each coding assistant's usage limit you have left (or, if you prefer, burned) — and whether it is
 still working, done, or waiting on you.**
 
 ![Collapsed notch with hover tooltip](docs/design/frame-124-hover-tooltip.png)

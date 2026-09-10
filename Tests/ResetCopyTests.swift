@@ -194,6 +194,15 @@ final class WindowSummaryTests: XCTestCase {
 
     /// The ring's label keeps the same honesty, one decimal under one percent
     /// and whole percents everywhere else.
+    /// Counting down, the label is the other half of the same rounded pair.
+    func testTheRingLabelFlipsToWhatIsLeft() {
+        XCTAssertEqual(window(0.12).usedFraction.map { snapshot($0).headlineText(remaining: true) }, "88%")
+        XCTAssertEqual(window(0.095).usedFraction.map { snapshot($0).headlineText(remaining: true) }, "90%")
+        XCTAssertEqual(window(0.0034).usedFraction.map { snapshot($0).headlineText(remaining: true) }, "99.7%")
+        XCTAssertEqual(window(0.0004).usedFraction.map { snapshot($0).headlineText(remaining: true) }, ">99.9%")
+        XCTAssertEqual(window(0.12).usedFraction.map { snapshot($0).headlineText(remaining: false) }, "12%")
+    }
+
     func testTheRingLabelCarriesTheFractionToo() {
         XCTAssertEqual(window(0.0034).usedFraction.map { snapshot($0).headlineText }, "0.3%")
         XCTAssertEqual(window(0.12).usedFraction.map { snapshot($0).headlineText }, "12%")

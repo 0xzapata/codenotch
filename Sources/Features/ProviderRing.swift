@@ -24,12 +24,17 @@ struct ProviderRing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.codenotchReduceTransparency) private var reduceTransparency
     @Environment(\.codenotchAccentColor) private var accentColor
+    @AppStorage(Preferences.ringShowsRemainingKey) private var showsRemaining = true
     @State private var spin: Double = 0
 
+    // The colour is about how close the limit is, whichever way the arc runs.
     private var band: UsageBand {
         isBlocked ? .exhausted : UsageBand.band(for: usedFraction ?? 0)
     }
-    private var sweep: CGFloat { CGFloat(min(max(usedFraction ?? 0, 0), 1)) }
+    private var sweep: CGFloat {
+        let used = CGFloat(min(max(usedFraction ?? 0, 0), 1))
+        return showsRemaining ? 1 - used : used
+    }
 
     var body: some View {
         ZStack {
@@ -164,9 +169,11 @@ struct ProviderCell: View {
     var activity: ActivitySummary?
     var isRefreshing: Bool = false
 
+    @AppStorage(Preferences.ringShowsRemainingKey) private var showsRemaining = true
+
     /// A dash, not "0%": nothing read is not the same as nothing used.
     private var percentText: String {
-        snapshot.hasReading ? snapshot.headlineText : "—"
+        snapshot.hasReading ? snapshot.headlineText(remaining: showsRemaining) : "—"
     }
 
     var body: some View {

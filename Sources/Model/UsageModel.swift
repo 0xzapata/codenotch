@@ -200,6 +200,14 @@ struct ProviderSnapshot: Identifiable, Equatable {
 
     var usedFraction: Double? { headline?.usedFraction }
 
+    /// What the cell prints under the ring: the spent end by default, or the
+    /// other end of the same figure when the ring counts down. The halves are
+    /// rounded as a pair so "12%" flips to "88%", never "87%".
+    func headlineText(remaining: Bool) -> String {
+        guard remaining, let usedFraction else { return headlineText }
+        return Percent.halves(for: usedFraction).left + "%"
+    }
+
     /// What the cell prints under the ring.
     var headlineText: String {
         if let usedFraction { return Percent.text(for: usedFraction) + "%" }

@@ -7,6 +7,10 @@ import os
 @MainActor
 final class Preferences: ObservableObject {
     static let showUsagePaceKey = "showUsagePace"
+    /// The ring and its label count down what is left rather than up what is
+    /// spent. On by default: "88%" under a ring that is mostly full answers
+    /// "how much do I have" without a subtraction.
+    static let ringShowsRemainingKey = "ringShowsRemaining"
 
     /// Providers the user has switched off. Stored as the *disconnected* set
     /// rather than the connected one, so a provider added in a later version is
@@ -98,6 +102,10 @@ final class Preferences: ObservableObject {
 
     @Published var showUsagePace: Bool {
         didSet { defaults.set(showUsagePace, forKey: Self.showUsagePaceKey) }
+    }
+
+    @Published var ringShowsRemaining: Bool {
+        didSet { defaults.set(ringShowsRemaining, forKey: Self.ringShowsRemainingKey) }
     }
 
     /// The colour used for positive usage and active-work indicators.
@@ -287,6 +295,7 @@ final class Preferences: ObservableObject {
         self.resetTimeFormat = defaults.string(forKey: Keys.resetTimeFormat)
             .flatMap(ResetTimeFormat.init(rawValue:)) ?? .automatic
         self.showUsagePace = defaults.bool(forKey: Self.showUsagePaceKey)
+        self.ringShowsRemaining = defaults.object(forKey: Self.ringShowsRemainingKey) as? Bool ?? true
         // Absent means never chosen. Main display only, because that is what a
         // single-panel setup always did — all-displays on a fresh install
         // would put notches where none were expected.

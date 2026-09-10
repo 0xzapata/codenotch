@@ -478,6 +478,13 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Toggle("Ring shows what is left", isOn: $preferences.ringShowsRemaining)
+                Text("The ring and its number count down the allowance that remains. "
+                     + "Off, they count up what has been used.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Toggle("Show usage pace", isOn: $preferences.showUsagePace)
                 Text("Compares each timed allowance with the time left until reset, "
                      + "showing quota in deficit or held in reserve.")
