@@ -66,9 +66,10 @@ final class NotchLayoutTests: XCTestCase {
         XCTAssertGreaterThan(innerEdge, NotchLayout.glyphSize / 2)
     }
 
-    /// The weekly arc sits between the activity ring and the track, touching
-    /// neither, and inside the main arc's inner edge.
+    /// The weekly arc is the session arc's equal in weight, sits between the
+    /// activity ring and the track, and never crosses the main arc.
     func testSecondaryArcClearsTheActivityRingAndTheTrack() {
+        XCTAssertEqual(NotchLayout.secondaryStroke, NotchLayout.progressStroke)
         let outer = NotchLayout.secondaryDiameter / 2 + NotchLayout.secondaryStroke / 2
         let inner = NotchLayout.secondaryDiameter / 2 - NotchLayout.secondaryStroke / 2
         let trackInnerEdge = NotchLayout.ringDiameter / 2 - NotchLayout.trackStroke

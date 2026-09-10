@@ -69,8 +69,9 @@ struct ProviderRing: View {
                         .animation(NotchMotion.reading, value: band)
                 }
 
-                // ponytail: one fixed blue, whatever the weekly band; colour it
-                // by band too if a blue arc at 95% ever reads as calm.
+                // Same weight as the session arc, one step in. ponytail: one
+                // fixed blue, whatever the weekly band; colour it by band too
+                // if a blue arc at 95% ever reads as calm.
                 if secondaryFraction != nil {
                     Circle()
                         .inset(by: (NotchLayout.ringDiameter - NotchLayout.secondaryDiameter) / 2)
