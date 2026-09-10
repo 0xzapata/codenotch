@@ -1469,10 +1469,11 @@ private struct RouterEntry: View {
     }
 
     var body: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
-            GridRow {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Router URL")
-                TextField(kind.defaultBaseURL, text: $baseURL)
+                TextField("Router URL", text: $baseURL, prompt: Text(kind.defaultBaseURL))
+                    .labelsHidden()
                     .textFieldStyle(.roundedBorder)
                     .controlSize(.small)
                     .autocorrectionDisabled()
@@ -1481,22 +1482,21 @@ private struct RouterEntry: View {
             }
             // The ring shows one upstream provider, all of its accounts summed.
             // The provider re-reads this on every fetch, so no restart.
-            GridRow {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Show provider")
-                HStack(spacing: 6) {
-                    Picker("Show provider", selection: $selected) {
-                        Text("First listed").tag("")
-                        ForEach(choices, id: \.self) { Text($0).tag($0) }
-                    }
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .frame(width: 140)
-                    .onChange(of: selected) { _ = signIn(kind.id) }
-                    Text("limits summed across its accounts")
-                        .foregroundStyle(.secondary)
+                Picker("Show provider", selection: $selected) {
+                    Text("First listed").tag("")
+                    ForEach(choices, id: \.self) { Text($0).tag($0) }
                 }
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: 160, alignment: .leading)
+                .onChange(of: selected) { _ = signIn(kind.id) }
+                Text("Limits are summed across all accounts of that provider.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            GridRow {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Token")
                 HStack(spacing: 8) {
                     SecureField("Token", text: $token)
@@ -1517,13 +1517,11 @@ private struct RouterEntry: View {
                         Text("Saved.").foregroundStyle(.green).controlSize(.small)
                     }
                 }
-            }
-            GridRow {
-                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
                 Text(tokenHint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
