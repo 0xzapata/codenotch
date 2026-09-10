@@ -1443,6 +1443,8 @@ private struct RouterEntry: View {
     @AppStorage private var baseURL: String
     @AppStorage private var selected: String
     @AppStorage private var known: String
+    @AppStorage private var windowsJSON: Data
+    @AppStorage private var accountCount: Int
     @State private var token = ""
     @State private var saved = false
 
@@ -1452,6 +1454,8 @@ private struct RouterEntry: View {
         _baseURL = AppStorage(wrappedValue: "", RouterCredentials.baseURLKey(kind))
         _selected = AppStorage(wrappedValue: "", RouterCredentials.providerKey(kind))
         _known = AppStorage(wrappedValue: "", RouterCredentials.knownProvidersKey(kind))
+        _windowsJSON = AppStorage(wrappedValue: Data(), RouterCredentials.windowsKey(kind))
+        _accountCount = AppStorage(wrappedValue: 0, RouterCredentials.accountCountKey(kind))
     }
 
     /// Providers the router listed last time, plus the chosen one even if it
@@ -1468,8 +1472,37 @@ private struct RouterEntry: View {
             : "Access token or manage-scoped API key."
     }
 
+    /// The provider the ring stands for: the chosen one, else the first listed.
+    private var shownProvider: String {
+        selected.isEmpty ? (choices.first ?? "Provider") : selected
+    }
+
+    /// What the provider summed on its last fetch, or nothing before one.
+    private var windows: [LimitWindow] {
+        (try? JSONDecoder().decode([LimitWindow].self, from: windowsJSON)) ?? []
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // The sum the ring shows, spelled out per window so the user can
+            // check it against the router's own dashboard: every account of
+            // the chosen provider added together, reset only when they agree.
+            if !windows.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(shownProvider) · \(accountCount == 1 ? "1 account" : "\(accountCount) accounts summed")")
+                        .foregroundStyle(.secondary)
+                    ForEach(windows) { window in
+                        HStack(spacing: 6) {
+                            Text(window.label)
+                            Text(window.summary).foregroundStyle(.secondary)
+                            if let reset = window.resetsAt {
+                                Text(ResetCopy.text(for: reset)).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+                .textSelection(.enabled)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text("Router URL")
                 TextField("Router URL", text: $baseURL, prompt: Text(kind.defaultBaseURL))

@@ -20,6 +20,11 @@ enum RouterCredentials {
     /// Comma-joined providers seen on the last fetch, so the Settings picker
     /// can offer them without a fetch of its own.
     static func knownProvidersKey(_ kind: RouterKind) -> String { "\(kind.id)KnownProviders" }
+    /// The last summed windows, JSON-encoded `[LimitWindow]`, and how many
+    /// accounts went into them — so Settings can show the sum under the
+    /// account without reaching into the usage store.
+    static func windowsKey(_ kind: RouterKind) -> String { "\(kind.id)Windows" }
+    static func accountCountKey(_ kind: RouterKind) -> String { "\(kind.id)AccountCount" }
 
     static func selectedProvider(_ kind: RouterKind, defaults: UserDefaults = .standard) -> String? {
         let value = defaults.string(forKey: providerKey(kind)) ?? ""
@@ -55,7 +60,10 @@ enum RouterCredentials {
 
     @discardableResult
     static func delete(_ kind: RouterKind) -> Bool {
-        KeychainItem.delete(service: keychainService(kind), account: keychainAccount)
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: windowsKey(kind))
+        defaults.removeObject(forKey: accountCountKey(kind))
+        return KeychainItem.delete(service: keychainService(kind), account: keychainAccount)
     }
 
     /// 9router's `getConsistentMachineId("9r-cli-auth")`, from

@@ -76,6 +76,9 @@ actor RouterProvider: UsageProvider {
             }
         }
         let windows = RouterUsage.aggregate(usages, provider: provider)
+        let defaults = UserDefaults.standard
+        defaults.set(try? JSONEncoder().encode(windows), forKey: RouterCredentials.windowsKey(kind))
+        defaults.set(usages.count, forKey: RouterCredentials.accountCountKey(kind))
 
         guard !windows.isEmpty else {
             throw UsageProviderError.nothingMetered(
