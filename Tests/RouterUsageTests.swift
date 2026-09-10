@@ -46,6 +46,15 @@ final class RouterUsageTests: XCTestCase {
         XCTAssertEqual(try RouterUsage.parseConnections(paged), [.init(id: "c9", provider: "codex", name: "me@x.com")])
     }
 
+    func testLoginRequestCarriesThePasswordAsJSON() {
+        let req = RouterUsage.loginRequest(base: URL(string: "https://host/9r")!, password: "pw ")
+        XCTAssertEqual(req.url?.absoluteString, "https://host/9r/api/auth/login")
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        let body = try! JSONSerialization.jsonObject(with: req.httpBody ?? Data()) as? [String: String]
+        XCTAssertEqual(body, ["password": "pw "])
+    }
+
     func testListingURLPerRouter() {
         let base = URL(string: "https://host/9r")!
         XCTAssertEqual(RouterUsage.connectionsURL(base: base, kind: .nineRouter).absoluteString,

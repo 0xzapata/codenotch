@@ -20,6 +20,11 @@ actor RouterProvider: UsageProvider {
     nonisolated var isVisibleWhenAbsent: Bool { false }
 
     private let session: URLSession
+    /// Reset each fetch: the base to log in against, and whether a dashboard
+    /// login has already been tried this fetch, so a wall of 401s from the
+    /// parallel usage calls cannot each fire their own login.
+    private var authBase: URL?
+    private var loginTried = false
 
     init(kind: RouterKind, session: URLSession = .shared) {
         self.kind = kind
@@ -43,6 +48,8 @@ actor RouterProvider: UsageProvider {
     func fetchSnapshot() async throws -> ProviderSnapshot {
         guard let base = RouterCredentials.baseURL(kind) else { throw UsageProviderError.needsAuth }
         let token = RouterCredentials.token(kind)
+        authBase = base
+        loginTried = false
 
         let connections = try RouterUsage.parseConnections(
             try await get(RouterUsage.connectionsURL(base: base, kind: kind), token: token)
@@ -109,12 +116,32 @@ actor RouterProvider: UsageProvider {
         }
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 || status == 403 { throw UsageProviderError.needsAuth }
+        if status == 401 || status == 403 {
+            // The headers were refused. On a login-required 9router the token
+            // is a dashboard password: log in once, and the retry rides the
+            // cookie the session now holds. One attempt per fetch.
+            if let token, let base = authBase, !loginTried {
+                loginTried = true
+                if await login(base: base, password: token) {
+                    return try await get(url, token: token)
+                }
+            }
+            throw UsageProviderError.needsAuth
+        }
         guard (200..<300).contains(status) else { throw UsageProviderError.badResponse(status: status) }
         // Bodies stay out of the log: the listing carries client secrets
         // and OmniRoute's carries masked keys; the shape is covered by tests.
         Log.usage.debug("\(self.kind.id, privacy: .public) \(url.path, privacy: .public) -> \(data.count) bytes")
         return data
+    }
+
+    /// Exchanges the dashboard password for the `auth_token` cookie the shared
+    /// session then sends on every later request. True when the router accepts
+    /// it, so the caller knows a retry is worth it.
+    private func login(base: URL, password: String) async -> Bool {
+        guard let (_, response) = try? await session.data(for: RouterUsage.loginRequest(base: base, password: password))
+        else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
     }
 
     nonisolated func signOut() async { RouterCredentials.delete(kind) }

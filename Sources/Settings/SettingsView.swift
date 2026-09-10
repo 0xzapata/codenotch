@@ -1475,7 +1475,7 @@ private struct RouterEntry: View {
 
     private var tokenHint: String {
         kind.id == "9router"
-            ? "Optional on this Mac: read from ~/.9router when empty."
+            ? "The dashboard password, a CLI token, or empty to read ~/.9router on this Mac."
             : "Access token or manage-scoped API key."
     }
 

@@ -74,6 +74,21 @@ enum RouterUsage {
         return parts.url!
     }
 
+    /// The 9router dashboard login: `POST /api/auth/login` with the password
+    /// in JSON. 9router requires a login when `requireLogin` is on, and it
+    /// takes neither a bearer nor a CLI token from another machine — a remote
+    /// router only opens to the dashboard password, exchanged here for the
+    /// `auth_token` cookie the session then carries. Public route, so it works
+    /// before any other credential.
+    static func loginRequest(base: URL, password: String) -> URLRequest {
+        var request = URLRequest(url: base.appendingPathComponent("api/auth/login"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["password": password])
+        request.timeoutInterval = 15
+        return request
+    }
+
     static func parseConnections(_ data: Data) throws -> [Connection] {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let list = root["connections"] as? [[String: Any]]
