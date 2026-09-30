@@ -178,6 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                    OllamaLocalProvider(endpoint: URL(string: preferences.ollamaEndpoint)!),
                    LMStudioLocalProvider(endpoint: URL(string: preferences.lmstudioEndpoint)!),
                    OllamaProvider(),
+                   RouterProvider(kind: .nineRouter), RouterProvider(kind: .omniRoute),
                    // A closure, not the value: the provider is an actor and
                    // re-reads the budget on every fetch, so a ceiling typed
                    // into Settings applies without a restart.
@@ -637,6 +638,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak fleet] in fleet?.apply(weeklyReading: $0) }
                 .store(in: &cancellables)
 
+            preferences.$ringShowsRemaining
+                .receive(on: RunLoop.main)
+                .sink { [weak fleet] in fleet?.apply(ringShowsRemaining: $0) }
+                .store(in: &cancellables)
+
             preferences.$weeklyRing
                 .receive(on: RunLoop.main)
                 .sink { [weak fleet] in fleet?.apply(weeklyRing: $0) }
@@ -1008,6 +1014,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fleet.apply(weeklyRingDashed: preferences.weeklyRingDashed)
         fleet.apply(showsNotchReadings: preferences.showsNotchReadings)
         fleet.apply(weeklyReading: preferences.weeklyReading)
+        fleet.apply(ringShowsRemaining: preferences.ringShowsRemaining)
         fleet.apply(foldsForFullScreen: preferences.foldsForFullScreen)
         fleet.apply(surfaceStyle: preferences.notchSurfaceStyle)
         fleet.apply(deepSeekPricingEnabled: preferences.deepSeekPricingEnabled)

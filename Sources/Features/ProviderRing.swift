@@ -40,14 +40,22 @@ struct ProviderRing: View {
     @Environment(\.colorTransitionStyle) private var colorTransitionStyle
     @Environment(\.codenotchAccentColor) private var accentColor
     @Environment(\.weeklyRingDashed) private var weeklyRingDashed
+    @Environment(\.ringShowsRemaining) private var showsRemaining
     @State private var spin: Double = 0
 
+    // The colour is about how close the limit is, whichever way the arc runs.
     private var band: UsageBand {
         guard !isBlocked else { return .exhausted }
         if let bandOverride { return bandOverride }
         return UsageBand.band(for: usedFraction ?? 0, watchLimit: watchLimit, criticalLimit: criticalLimit)
     }
-    private var sweep: CGFloat { CGFloat(min(max(usedFraction ?? 0, 0), 1)) }
+    private var sweep: CGFloat { Self.sweep(for: usedFraction, remaining: showsRemaining) }
+    /// Counting down, a limit's arc is what is left; the colour stays about
+    /// how close the limit is, whichever way the arc runs.
+    static func sweep(for fraction: Double?, remaining: Bool) -> CGFloat {
+        let used = CGFloat(min(max(fraction ?? 0, 0), 1))
+        return remaining ? 1 - used : used
+    }
     private var localSweep: CGFloat { Self.localSweep(for: localContextFraction) }
     /// The floor is a drawing decision only — the number under the ring and in
     /// the card stays true.
@@ -73,7 +81,7 @@ struct ProviderRing: View {
     private var weeklyBand: UsageBand {
         isBlocked ? .exhausted : UsageBand.band(for: weeklyFraction ?? 0, watchLimit: watchLimit, criticalLimit: criticalLimit)
     }
-    private var weeklySweep: CGFloat { CGFloat(min(max(weeklyFraction ?? 0, 0), 1)) }
+    private var weeklySweep: CGFloat { Self.sweep(for: weeklyFraction, remaining: showsRemaining) }
     /// Same fallback rule as `primaryRingColor`, minus `bandOverride` — the weekly ring has none.
     private var weeklyRingColor: Color {
         guard !isBlocked, colorTransitionStyle == .ramp else { return weeklyBand.color(accent: accentColor) }
@@ -291,10 +299,11 @@ struct ProviderCell: View {
     /// second line would be drawn in the bezel. The reading is still a hover
     /// away in the card.
     var showsReading: Bool = true
+    @Environment(\.ringShowsRemaining) private var showsRemaining
 
     private var reading: ProviderReading {
         ProviderReading(snapshot: snapshot, weeklyRing: weeklyRing,
-                        showsWeeklyReading: showsWeeklyReading)
+                        showsWeeklyReading: showsWeeklyReading, showsRemaining: showsRemaining)
     }
 
     private var readingText: String { reading.text }
@@ -347,10 +356,21 @@ private struct WeeklyRingDashedKey: EnvironmentKey {
     static let defaultValue: Bool = false
 }
 
+/// Off here, so a ring drawn outside the notch counts up as it always did;
+/// the notch passes the preference in, which is on by default.
+private struct RingShowsRemainingKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
 extension EnvironmentValues {
     var weeklyRingDashed: Bool {
         get { self[WeeklyRingDashedKey.self] }
         set { self[WeeklyRingDashedKey.self] = newValue }
+    }
+
+    var ringShowsRemaining: Bool {
+        get { self[RingShowsRemainingKey.self] }
+        set { self[RingShowsRemainingKey.self] = newValue }
     }
 }
 
@@ -474,6 +494,9 @@ struct ProviderReading: View {
     var weeklyRing: WeeklyRing = .off
     /// Whether the reading adds the weekly ring's percentage, as "30%/70%".
     var showsWeeklyReading: Bool = false
+    /// Counts down what is left rather than up what is spent. A property, not
+    /// the environment: the notch measures this text outside any view.
+    var showsRemaining: Bool = false
     /// Drawn on its own across the Mac's notch rather than under the ring: the
     /// larger size, and no more room along the bar than `width`.
     var across: CGFloat? = nil
@@ -483,8 +506,13 @@ struct ProviderReading: View {
     /// A dash, not "0%": nothing read is not the same as nothing used.
     var text: String {
         guard snapshot.hasReading else { return "—" }
-        guard let weekly = weeklyReading else { return snapshot.headlineText }
-        return "\(snapshot.headlineText)/\(Percent.text(for: weekly))%"
+        let headline = snapshot.headlineText(remaining: showsRemaining)
+        guard let weekly = weeklyReading else { return headline }
+        let accounts = snapshot.weeklyWindow?.accounts ?? 1
+        let weeklyText = showsRemaining
+            ? Percent.halves(for: weekly, accounts: accounts).left
+            : Percent.text(for: weekly, accounts: accounts)
+        return "\(headline)/\(weeklyText)%"
     }
 
     /// What the weekly ring draws, when it and its reading are on. The pair

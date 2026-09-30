@@ -201,6 +201,7 @@ struct NotchRootView: View {
             reduceTransparency: reduceTransparency
         ))
         .environment(\.weeklyRingDashed, model.weeklyRingDashed)
+        .environment(\.ringShowsRemaining, model.ringShowsRemaining)
         .environment(\.usageWatchLimit, model.watchLimit)
         .environment(\.usageCriticalLimit, model.criticalLimit)
         .environment(\.colorTransitionStyle, model.colorTransitionStyle)
@@ -504,6 +505,7 @@ struct NotchRootView: View {
         if model.readsAcrossTheCutout, let snapshot = model.snapshots.first {
             ProviderReading(snapshot: snapshot, weeklyRing: model.weeklyRing,
                             showsWeeklyReading: model.weeklyReading,
+                            showsRemaining: model.ringShowsRemaining,
                             across: run.upperBound - run.lowerBound,
                             acrossAlignment: wing.onTheLeft ? .trailing : .leading)
                 .fixedSize(horizontal: false, vertical: true)

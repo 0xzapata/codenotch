@@ -1,0 +1,23 @@
+name: DMG
+
+# Manual only. Runs the tests, then builds upstream's unsigned, ad-hoc signed
+# disk image (`make dmg-ci`) and uploads it as a workflow artifact. Upstream's
+# own CI and Package workflows only run in vinzdg/codenotch, so this is the
+# fork's way to test and package. Nothing here touches a Developer ID or the
+# Sparkle appcast.
+on:
+  workflow_dispatch:
+
+jobs:
+  dmg:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen create-dmg
+      - run: make test-ci
+      - run: make dmg-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Codenotch-unsigned-dmg
+          path: build/ci/*.dmg
+          if-no-files-found: error
