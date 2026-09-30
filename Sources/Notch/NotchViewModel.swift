@@ -207,6 +207,7 @@ final class NotchViewModel: ObservableObject {
     @Published var weeklyRing: WeeklyRing = .off
     @Published var weeklyRingDashed: Bool = false
     @Published var weeklyReading: Bool = false
+    @Published var ringShowsRemaining: Bool = false
     @Published var watchLimit: Double = 0.50
     @Published var criticalLimit: Double = 0.70
     /// Mirrored from Settings like `surfaceStyle`, just below.
@@ -886,7 +887,8 @@ final class NotchViewModel: ObservableObject {
     var readingAcrossTextWidth: CGFloat {
         guard let snapshot = snapshots.first else { return 0 }
         return ProviderReading(snapshot: snapshot, weeklyRing: weeklyRing,
-                               showsWeeklyReading: weeklyReading).acrossWidth
+                               showsWeeklyReading: weeklyReading,
+                               showsRemaining: ringShowsRemaining).acrossWidth
     }
 
     /// **How long the side carrying it needs to be**, in design points: out of

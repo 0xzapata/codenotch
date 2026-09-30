@@ -431,7 +431,7 @@ private struct LimitWindowRow: View {
     @Environment(\.usageCriticalLimit) private var criticalLimit
     @Environment(\.colorTransitionStyle) private var colorTransitionStyle
     @Environment(\.tooltipSecondaryInk) private var secondaryInk
-    @AppStorage(Preferences.ringShowsRemainingKey) private var showsRemaining = true
+    @Environment(\.ringShowsRemaining) private var showsRemaining
 
     private var band: UsageBand {
         if let override = window.bandOverride { return override }

@@ -40,7 +40,7 @@ struct ProviderRing: View {
     @Environment(\.colorTransitionStyle) private var colorTransitionStyle
     @Environment(\.codenotchAccentColor) private var accentColor
     @Environment(\.weeklyRingDashed) private var weeklyRingDashed
-    @AppStorage(Preferences.ringShowsRemainingKey) private var showsRemaining = true
+    @Environment(\.ringShowsRemaining) private var showsRemaining
     @State private var spin: Double = 0
 
     // The colour is about how close the limit is, whichever way the arc runs.
@@ -299,10 +299,11 @@ struct ProviderCell: View {
     /// second line would be drawn in the bezel. The reading is still a hover
     /// away in the card.
     var showsReading: Bool = true
+    @Environment(\.ringShowsRemaining) private var showsRemaining
 
     private var reading: ProviderReading {
         ProviderReading(snapshot: snapshot, weeklyRing: weeklyRing,
-                        showsWeeklyReading: showsWeeklyReading)
+                        showsWeeklyReading: showsWeeklyReading, showsRemaining: showsRemaining)
     }
 
     private var readingText: String { reading.text }
@@ -355,10 +356,21 @@ private struct WeeklyRingDashedKey: EnvironmentKey {
     static let defaultValue: Bool = false
 }
 
+/// Off here, so a ring drawn outside the notch counts up as it always did;
+/// the notch passes the preference in, which is on by default.
+private struct RingShowsRemainingKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
 extension EnvironmentValues {
     var weeklyRingDashed: Bool {
         get { self[WeeklyRingDashedKey.self] }
         set { self[WeeklyRingDashedKey.self] = newValue }
+    }
+
+    var ringShowsRemaining: Bool {
+        get { self[RingShowsRemainingKey.self] }
+        set { self[RingShowsRemainingKey.self] = newValue }
     }
 }
 
@@ -482,13 +494,14 @@ struct ProviderReading: View {
     var weeklyRing: WeeklyRing = .off
     /// Whether the reading adds the weekly ring's percentage, as "30%/70%".
     var showsWeeklyReading: Bool = false
+    /// Counts down what is left rather than up what is spent. A property, not
+    /// the environment: the notch measures this text outside any view.
+    var showsRemaining: Bool = false
     /// Drawn on its own across the Mac's notch rather than under the ring: the
     /// larger size, and no more room along the bar than `width`.
     var across: CGFloat? = nil
     /// Which end of that room it sits at — the Mac's notch's.
     var acrossAlignment: Alignment = .leading
-
-    @AppStorage(Preferences.ringShowsRemainingKey) private var showsRemaining = true
 
     /// A dash, not "0%": nothing read is not the same as nothing used.
     var text: String {

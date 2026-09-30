@@ -80,3 +80,22 @@ final class ProviderCellReadingTests: XCTestCase {
         XCTAssertEqual(reading(claude([session(), weekly(nil)])), "Claude, 30%")
     }
 }
+
+/// Counting down, the reading is what is left of each ring: a router's pool
+/// out of its whole, and the weekly the same way round.
+@MainActor
+final class ProviderReadingRemainingTests: XCTestCase {
+    func testTheReadingCountsDownWhatIsLeft() {
+        let pooled = LimitWindow(id: "session", label: "session", usedFraction: 0.21, accounts: 2)
+        let weekly = LimitWindow(id: "weekly", label: "weekly", usedFraction: 0.30)
+        let snapshot = ProviderSnapshot(id: "9router", displayName: "9router", glyph: .nineRouter,
+                                        fidelity: .official, status: .ok, windows: [pooled, weekly],
+                                        headlineID: "session", weeklyID: "weekly")
+        func text(_ remaining: Bool) -> String {
+            ProviderReading(snapshot: snapshot, weeklyRing: .outside, showsWeeklyReading: true,
+                            showsRemaining: remaining).text
+        }
+        XCTAssertEqual(text(true), "158%/70%")
+        XCTAssertEqual(text(false), "42%/30%")
+    }
+}
