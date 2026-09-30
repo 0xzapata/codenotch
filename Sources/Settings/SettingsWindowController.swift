@@ -9,6 +9,8 @@ import SwiftUI
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
+    /// Ends text editing when a click lands anywhere but a text field.
+    private var clickAwayMonitor: Any?
     private let preferences: Preferences
     /// A closure, not a snapshot. Read once at launch, the account shown here
     /// went stale the moment someone switched account in Cursor — and stayed
@@ -19,7 +21,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let switchAccount: (String) -> Bool
     private let retry: (String) -> Void
     private let updater: Updater
+    private let ollamaRelay: OllamaActivityRelay?
+    private let lmstudioMetrics: LMStudioMetrics?
+    private let usageStore: UsageStore?
+    let phoneLinkPairing: PhoneLinkPairing?
+    let phoneLinkRegistry: PhoneLinkRegistry?
+    let phoneLinkServerStatus: PhoneLinkServerStatus?
     private let resetPosition: () -> Void
+    private let quit: () -> Void
+    private let previewResetAlert: (() -> Void)?
+    private let previewSessionLimitAlert: (() -> Void)?
+    private let previewWeeklyLimitAlert: (() -> Void)?
+    private let sendTestNotification: (() -> Void)?
 
     init(preferences: Preferences,
          providers: @escaping () -> [ProviderSummary],
@@ -28,8 +41,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
          signIn: @escaping (String) -> Bool,
          switchAccount: @escaping (String) -> Bool,
          retry: @escaping (String) -> Void,
-         resetPosition: @escaping () -> Void) {
+         resetPosition: @escaping () -> Void,
+         quit: @escaping () -> Void,
+         previewResetAlert: (() -> Void)? = nil,
+         previewSessionLimitAlert: (() -> Void)? = nil,
+         previewWeeklyLimitAlert: (() -> Void)? = nil,
+         sendTestNotification: (() -> Void)? = nil,
+         usageStore: UsageStore? = nil,
+         ollamaRelay: OllamaActivityRelay? = nil,
+         lmstudioMetrics: LMStudioMetrics? = nil, phoneLinkPairing: PhoneLinkPairing? = nil, phoneLinkRegistry: PhoneLinkRegistry? = nil, phoneLinkServerStatus: PhoneLinkServerStatus? = nil) {
+        self.ollamaRelay = ollamaRelay
+        self.lmstudioMetrics = lmstudioMetrics
+        self.usageStore = usageStore
+        self.phoneLinkPairing = phoneLinkPairing
+        self.phoneLinkRegistry = phoneLinkRegistry
+        self.phoneLinkServerStatus = phoneLinkServerStatus
         self.resetPosition = resetPosition
+        self.quit = quit
+        self.previewResetAlert = previewResetAlert
+        self.previewSessionLimitAlert = previewSessionLimitAlert
+        self.previewWeeklyLimitAlert = previewWeeklyLimitAlert
+        self.sendTestNotification = sendTestNotification
         self.switchAccount = switchAccount
         self.retry = retry
         self.updater = updater
@@ -56,6 +88,66 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        Self.startUnfocused(window)
+    }
+
+    /// Opened with nothing being typed in. AppKit hands a window that becomes
+    /// key to the first control in its key-view loop — here, whichever text
+    /// field the open pane happens to start with — so Settings opened with a
+    /// caret blinking in an API key field, and AutoFill offering passwords for
+    /// it. Cleared now and once more after SwiftUI's first layout, which is
+    /// when a freshly built pane's fields join the loop. Tab still reaches them.
+    static func startUnfocused(_ window: NSWindow) {
+        window.makeFirstResponder(nil)
+        DispatchQueue.main.async { [weak window] in
+            guard let window, window.firstResponder is NSText else { return }
+            window.makeFirstResponder(nil)
+        }
+    }
+
+    /// A text field in Settings stayed active — caret blinking, AutoFill's
+    /// "Passwords…" bubble hanging under it — until another field took focus,
+    /// because AppKit only moves focus between controls that accept it, and
+    /// most of this panel (rows, labels, the background) does not. A click
+    /// anywhere else in the window now ends the editing. The value is not
+    /// lost: the fields bind on every keystroke, and the click still goes
+    /// through to whatever it landed on, a Save button included.
+    ///
+    /// Decided after the click, from where focus actually went, not from what
+    /// the click hit: a SwiftUI text field sits inside wrapper views, and
+    /// judging by the hit view read a click into another field as a click
+    /// away — the new field took focus and was dropped a moment later.
+    private func watchForClicksAway(in window: NSWindow) {
+        guard clickAwayMonitor == nil else { return }
+        clickAwayMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window] event in
+            guard let window, event.window === window,
+                  let edited = Self.editedField(in: window)
+            else { return event }
+            let fieldFrame = edited.convert(edited.bounds, to: nil)
+            guard !Self.isInside(event.locationInWindow, fieldFrame: fieldFrame) else { return event }
+            // After the click is delivered, so a button it landed on still sees
+            // the edited value, and a field it landed on has taken focus.
+            DispatchQueue.main.async { [weak window, weak edited] in
+                guard let window, let edited,
+                      Self.editedField(in: window) === edited
+                else { return }   // focus already moved on, to another field or nowhere
+                window.makeFirstResponder(nil)
+            }
+            return event
+        }
+    }
+
+    /// The text field being typed in: AppKit edits it through the window's
+    /// shared field editor, whose delegate is the field.
+    private static func editedField(in window: NSWindow) -> NSTextField? {
+        guard let editor = window.firstResponder as? NSTextView, editor.isFieldEditor else { return nil }
+        return editor.delegate as? NSTextField
+    }
+
+    /// Whether a click belongs to the field being edited, allowing a few points
+    /// round it for the focus ring and the bezel the eye counts as the field.
+    static func isInside(_ point: NSPoint, fieldFrame: NSRect) -> Bool {
+        fieldFrame.insetBy(dx: -4, dy: -4).contains(point)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -99,6 +191,26 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         layoutTrafficLights(in: window)
     }
 
+    /// Put the window away if it is already in front, otherwise bring it up.
+    ///
+    /// Only the notch's own gear calls this. A menu item reading "Settings…"
+    /// and the first-launch introduction both `show()` instead, because a
+    /// command that names a destination should go there rather than toggle.
+    ///
+    /// The condition is *key*, not merely visible. Clicking the gear while the
+    /// window is open but behind something else should fetch it forward — the
+    /// intent there is plainly "show me that", and closing it would be the one
+    /// thing the click could not have meant.
+    func toggle() {
+        if let window, window.isVisible, window.isKeyWindow {
+            // `isReleasedWhenClosed` is false, so this hides it and keeps the
+            // window itself for the next `show()`.
+            window.close()
+            return
+        }
+        show()
+    }
+
     func show() {
         if let window {
             // Re-centered every time, not only at creation: a window is
@@ -127,7 +239,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         )
         // Kept for the Window menu and Mission Control; hidden from the bar
         // itself, where the sidebar already names what you are looking at.
-        window.title = "Codenotch Settings"
+        window.title = L10n.t("Codenotch Settings")
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         // A floating rounded panel rather than a square window. The rounded
@@ -137,17 +249,30 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // instead of showing black wedges outside the curve.
         window.isOpaque = false
         window.backgroundColor = .clear
+        // The panel is always drawn dark (see `SettingsView.body`); AppKit's
+        // own controls inside it — pickers, switches, menus — follow suit.
+        window.appearance = NSAppearance(named: .darkAqua)
         window.hasShadow = true
         window.delegate = self
+        watchForClicksAway(in: window)
+        // The window itself answers first, not the first text field in it.
+        window.initialFirstResponder = nil
         window.contentView = NSHostingView(
             rootView: SettingsView(preferences: preferences,
-                                   providers: providers,
+                                   providers: providers, phoneLinkPairing: phoneLinkPairing, phoneLinkRegistry: phoneLinkRegistry, phoneLinkServerStatus: phoneLinkServerStatus,
                                    signOut: signOut,
                                    signIn: signIn,
                                    switchAccount: switchAccount,
                                    retry: retry,
                                    resetPosition: resetPosition,
-                                   updater: updater)
+                                   quit: quit,
+                                   updater: updater,
+                                   ollamaRelay: ollamaRelay, lmstudioMetrics: lmstudioMetrics,
+                                   usageStore: usageStore,
+                                   previewResetAlert: previewResetAlert,
+                                   previewSessionLimitAlert: previewSessionLimitAlert,
+                                   previewWeeklyLimitAlert: previewWeeklyLimitAlert,
+                                   sendTestNotification: sendTestNotification)
         )
         window.center()
         window.isReleasedWhenClosed = false

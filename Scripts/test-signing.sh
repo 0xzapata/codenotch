@@ -17,7 +17,7 @@ EOF
 cat > "$fixture_dir/openssl" <<'EOF'
 #!/bin/bash
 cat > /dev/null
-printf '%s\n' 'subject=OU = ORPHAN1234, CN = Apple Development: Contributor'
+printf '%s\n' 'subject=' 'OU=ORPHAN1234' 'CN=Apple Development: Contributor'
 EOF
 chmod +x "$fixture_dir/security" "$fixture_dir/openssl"
 export PATH="$fixture_dir:$PATH"
@@ -41,13 +41,13 @@ check_signing 'certificate without a valid identity uses ad-hoc' \
 SIGNING_IDENTITIES='  1) AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "Apple Development: Contributor (TEAM123456)"
      1 valid identities found'
 check_signing 'valid development identity supplies its team' \
-    'Debug CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="TEAM123456"'
+    'Debug CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="ORPHAN1234"'
 
 SIGNING_IDENTITIES='  1) AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "Apple Development: Contributor (TEAM123456)"
   2) BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB "Apple Development: Another Contributor (TEAM654321)"
      2 valid identities found'
 check_signing 'multiple development identities select one team' \
-    'Debug CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="TEAM123456" PROVISIONING_PROFILE_SPECIFIER=""'
+    'Debug CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="ORPHAN1234" PROVISIONING_PROFILE_SPECIFIER=""'
 
 SIGNING_IDENTITIES='  1) AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "Developer ID Application: Maintainer (6WFPL8B9FB)"
   2) BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB "Apple Development: Contributor (TEAM123456)"

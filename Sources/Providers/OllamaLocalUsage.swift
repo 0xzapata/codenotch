@@ -1,111 +1,95 @@
 import Foundation
 
-/// Parses the `/api/ps` payload from a local Ollama daemon (`http://127.0.0.1:11434/api/ps`),
-/// representing models currently loaded into memory or VRAM.
 enum OllamaLocalUsage {
-    struct PSResponse: Decodable {
-        let models: [LoadedModel]?
-    }
+    private struct Response: Decodable {
+        struct Model: Decodable {
+            struct Details: Decodable {
+                let quantization_level: String?
+            }
 
-    struct LoadedModel: Decodable {
-        let name: String
-        let model: String
-        let size: Int64?
-        let digest: String?
-        let expiresAt: String?
-        let sizeVram: Int64?
-        let details: ModelDetails?
-
-        enum CodingKeys: String, CodingKey {
-            case name, model, size, digest, details
-            case expiresAt = "expires_at"
-            case sizeVram = "size_vram"
+            let name: String
+            let size: Int64?
+            let size_vram: Int64?
+            let context_length: Int?
+            let expires_at: String?
+            let details: Details?
         }
+        let models: [Model]
     }
 
-    struct ModelDetails: Decodable {
-        let parentModel: String?
-        let format: String?
-        let family: String?
-        let families: [String]?
-        let parameterSize: String?
-        let quantizationLevel: String?
-
-        enum CodingKeys: String, CodingKey {
-            case parentModel = "parent_model"
-            case format, family, families
-            case parameterSize = "parameter_size"
-            case quantizationLevel = "quantization_level"
+    static func parse(_ data: Data) throws -> LocalRuntimeReading {
+        guard let response = try? JSONDecoder().decode(Response.self, from: data) else {
+            throw OllamaError.invalidResponse
         }
+        var seen = Set<String>()
+        let models = try response.models.map { model in
+            guard !model.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  seen.insert(model.name).inserted,
+                  model.size.map({ $0 >= 0 }) ?? true,
+                  model.size_vram.map({ $0 >= 0 }) ?? true,
+                  model.context_length.map({ $0 > 0 }) ?? true else {
+                throw OllamaError.invalidResponse
+            }
+            let quantization = model.details?.quantization_level?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return LocalRuntimeReading.Model(
+                name: model.name, memoryBytes: model.size, contextLength: model.context_length,
+                quantizationLevel: quantization?.isEmpty == false ? quantization : nil,
+                gpuMemoryBytes: model.size_vram, expiresAt: model.expires_at.flatMap(parseISO8601)
+            )
+        }.sorted { $0.id < $1.id }
+        return LocalRuntimeReading(models: models)
     }
 
-    /// Converts the `/api/ps` payload into Codenotch limit windows.
-    static func windows(from data: Data) throws -> [LimitWindow] {
-        let decoder = JSONDecoder()
-        let response = try decoder.decode(PSResponse.self, from: data)
-        guard let models = response.models, !models.isEmpty else {
-            // Idle state: Ollama daemon is active, but no model is currently in memory
-            return [
-                LimitWindow(
-                    id: "ollama.idle",
-                    label: "Local Models",
-                    usedFraction: 0,
-                    remaining: nil,
-                    used: nil,
-                    resetsAt: nil
-                )
-            ]
-        }
-
-        var windows: [LimitWindow] = []
-        for (index, m) in models.enumerated() {
-            let expirationDate = m.expiresAt.flatMap(parseISO8601)
-            let memBytes = memoryBytes(for: m)
-            let memGB = Int(memBytes / (1024 * 1024 * 1024))
-            let id = index == 0 ? "ollama.primary" : "ollama.\(m.name)"
-
-            windows.append(LimitWindow(
-                id: id,
-                label: m.name,
-                usedFraction: 1.0, // Active in memory
-                remaining: nil,
-                used: memGB > 0 ? memGB : 1,
-                resetsAt: expirationDate
-            ))
-        }
-        return windows
-    }
-
-    /// Resolves memory bytes, preferring VRAM when > 0, falling back to model size in system RAM.
-    static func memoryBytes(for model: LoadedModel) -> Int64 {
-        if let vram = model.sizeVram, vram > 0 {
-            return vram
-        }
-        return model.size ?? 0
-    }
-
-    /// Formats bytes into a human-readable VRAM or memory size string.
-    static func formatMemory(_ bytes: Int64, isVram: Bool = true) -> String {
-        let label = isVram ? "VRAM" : "RAM"
-        let gb = Double(bytes) / (1024 * 1024 * 1024)
-        if gb >= 1.0 {
-            return String(format: "%.1f GB %@", locale: Locale(identifier: "en_US_POSIX"), gb, label)
-        }
-        let mb = Double(bytes) / (1024 * 1024)
-        return String(format: "%.0f MB %@", locale: Locale(identifier: "en_US_POSIX"), mb, label)
-    }
-
-    /// Formats bytes into a human-readable VRAM string (convenience helper).
-    static func formatVRAM(_ bytes: Int64) -> String {
-        formatMemory(bytes, isVram: true)
-    }
-
-    /// Parses an ISO8601 string, handling fractional seconds or timezone offsets.
     static func parseISO8601(_ string: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = formatter.date(from: string) { return d }
+        if let date = formatter.date(from: string) { return date }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: string)
+    }
+}
+
+enum OllamaError: LocalizedError {
+    case invalidEndpoint
+    case unavailable
+    case invalidResponse
+    case http(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidEndpoint:
+            return "Use an HTTP address on this Mac, such as http://127.0.0.1:11434."
+        case .unavailable:
+            return "Ollama server unavailable. Open Ollama and check the server address."
+        case .invalidResponse:
+            return "This server did not return an Ollama model listing."
+        case .http(let code):
+            return "Ollama returned HTTP \(code). Check the server address and configuration."
+        }
+    }
+}
+
+enum OllamaEndpoint {
+    static let defaultAddress = "http://127.0.0.1:11434"
+
+    static func parse(_ address: String) throws -> URL {
+        guard var parts = URLComponents(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
+              parts.scheme?.lowercased() == "http",
+              let host = parts.host?.lowercased(),
+              ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host),
+              parts.user == nil, parts.password == nil,
+              parts.query == nil, parts.fragment == nil,
+              parts.path.isEmpty || parts.path == "/",
+              parts.port.map({ (1...65535).contains($0) }) ?? true else {
+            throw OllamaError.invalidEndpoint
+        }
+        // Resolve the familiar spelling to a literal loopback address; no DNS or
+        // proxy is needed for the local-only connection.
+        parts.host = host == "localhost" ? "127.0.0.1" : host
+        parts.scheme = "http"
+        parts.path = ""
+        guard let url = parts.url else { throw OllamaError.invalidEndpoint }
+        return url
     }
 }

@@ -37,11 +37,18 @@ import Foundation
 /// used to do. Enterprise is the opposite: there is no percentage field, so
 /// `used`/`limit` on `overall` is the reading.
 enum CursorUsage {
-    static let modelsLabel = "Auto usage"
+    static var modelsLabel: String { L10n.t("Auto usage") }
 
     /// The window the ring should mean. Cursor Models when that field exists,
     /// never the blended total, never API — and on an enterprise/team plan,
     /// which reports neither, the hard `included` ceiling.
+    static func plan(fromJSON json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return (root["membershipType"] as? String)?.nonEmptyPlan
+    }
+
     static func headlineID(in windows: [LimitWindow]) -> String {
         if windows.contains(where: { $0.id == "auto" }) { return "auto" }
         if windows.contains(where: { $0.id == "included" }) { return "included" }
@@ -70,12 +77,12 @@ enum CursorUsage {
                                        duration: duration))
         }
         if let api = percent(plan["apiPercentUsed"]), api > 0 {
-            windows.append(LimitWindow(id: "api", label: "API usage",
+            windows.append(LimitWindow(id: "api", label: L10n.t("API usage"),
                                        usedFraction: api, resetsAt: resetsAt,
                                        duration: duration))
         }
         if let onDemand = spendWindow(usage["onDemand"], id: "on_demand",
-                                      label: "On demand", resetsAt: resetsAt,
+                                      label: L10n.t("On demand"), resetsAt: resetsAt,
                                       duration: duration) {
             windows.append(onDemand)
         }
@@ -85,12 +92,12 @@ enum CursorUsage {
         // provider's headlineID still resolves.
         if windows.isEmpty,
            let overall = spendWindow(usage["overall"], id: "included",
-                                     label: "Included usage", resetsAt: resetsAt,
+                                     label: L10n.t("Included usage"), resetsAt: resetsAt,
                                      duration: duration) {
             windows.append(overall)
         }
         if let teamOnDemand = spendWindow(team["onDemand"], id: "team_on_demand",
-                                          label: "Team on demand", resetsAt: resetsAt,
+                                          label: L10n.t("Team on demand"), resetsAt: resetsAt,
                                           duration: duration),
            (teamOnDemand.usedFraction ?? 0) > 0 {
             windows.append(teamOnDemand)
@@ -100,9 +107,9 @@ enum CursorUsage {
 
         let membership = (root["membershipType"] as? String) ?? "this"
         if (root["isUnlimited"] as? Bool) == true {
-            throw UsageProviderError.nothingMetered("Unlimited on the \(membership) plan — nothing to meter")
+            throw UsageProviderError.nothingMetered(L10n.t("Unlimited on the \(membership) plan — nothing to meter"))
         }
-        throw UsageProviderError.nothingMetered("The \(membership) plan has nothing for Cursor to meter yet")
+        throw UsageProviderError.nothingMetered(L10n.t("The \(membership) plan has nothing for Cursor to meter yet"))
     }
 
     /// A dollar-denominated bucket, used where a plan states a real ceiling.

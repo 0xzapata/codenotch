@@ -30,6 +30,21 @@ final class ClaudeUsageCLITests: XCTestCase {
 
     // MARK: - What the output means
 
+    func testANamedTierAboveTheWindowsIsRead() {
+        let extra = """
+        You are currently using your extra usage to power your Claude Code usage
+
+        Current session: 10% used · resets Sep 7 at 2:59pm (Asia/Jakarta)
+        """
+        XCTAssertEqual(ClaudeUsageCLI.plan(in: extra), "extra usage")
+        XCTAssertNil(ClaudeUsageCLI.plan(in: live))
+        XCTAssertEqual(ClaudeUsageCLI.plan(in: """
+        You are currently using Max 5x
+
+        Current session: 1% used · resets Sep 7 at 2:59pm
+        """), "Max 5x")
+    }
+
     func testItReadsBothWindowsOffARealAnswer() throws {
         let windows = try ClaudeUsageCLI.parse(live, now: date("2026-09-07T06:00:00Z"))
 
@@ -186,6 +201,111 @@ final class ClaudeUsageCLITests: XCTestCase {
         let home = try makeHome(executableAt: ".local/bin/claude", executable: false)
 
         XCTAssertNil(ClaudeUsageCLI.locate(home: home, root: home))
+    }
+
+    // MARK: - Where it runs
+
+    /// One directory, reused. Claude Code files a transcript folder per working
+    /// directory, so a fresh one per call left a folder behind every five
+    /// minutes.
+    func testTheScratchDirectoryIsOneFixedPlace() throws {
+        let support = try makeHome(executableAt: nil)
+
+        let first = try ClaudeUsageCLI.scratchDirectory(applicationSupport: support)
+        let second = try ClaudeUsageCLI.scratchDirectory(applicationSupport: support)
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.path, support.appendingPathComponent("Codenotch/usage-scratch").path)
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+    }
+
+    /// A place that cannot be made is an error for the caller to fall back
+    /// from, not a silent run in whatever directory the app was launched in.
+    func testAScratchDirectoryThatCannotBeMadeThrows() throws {
+        let support = try makeHome(executableAt: nil)
+        // A file where the parent directory has to go.
+        FileManager.default.createFile(atPath: support.appendingPathComponent("Codenotch").path,
+                                       contents: Data())
+
+        XCTAssertThrowsError(try ClaudeUsageCLI.scratchDirectory(applicationSupport: support))
+    }
+
+    /// Print mode without a transcript: the two flags are what stop Claude Code
+    /// filing a session for every poll, and `/usage` still has to be what is
+    /// asked.
+    func testItAsksInPrintModeWithoutATranscript() {
+        XCTAssertTrue(ClaudeUsageCLI.arguments.contains("--print"))
+        XCTAssertTrue(ClaudeUsageCLI.arguments.contains("--no-session-persistence"))
+        XCTAssertEqual(ClaudeUsageCLI.arguments.last, "/usage")
+    }
+
+    /// No MCP servers for a usage poll. `--strict-mcp-config` on its own is
+    /// the whole switch; a `--mcp-config` beside it would eat `/usage` as a
+    /// second config path, so it must stay absent.
+    func testItStartsNoMCPServers() {
+        XCTAssertTrue(ClaudeUsageCLI.arguments.contains("--strict-mcp-config"))
+        XCTAssertFalse(ClaudeUsageCLI.arguments.contains("--mcp-config"))
+    }
+
+    // MARK: - Where it is found
+
+    /// npm is how most people install Claude Code, and under a Node version
+    /// manager its bin directory is named for the Node version — a path no
+    /// fixed string can spell.
+    func testItFindsClaudeInstalledUnderNVM() throws {
+        let home = try makeHome(executablesAt: [".nvm/versions/node/v22.22.3/bin/claude"])
+
+        XCTAssertEqual(ClaudeUsageCLI.locate(home: home, root: home)?.binary.lastPathComponent,
+                       "claude")
+    }
+
+    /// A machine that has upgraded Node keeps every old version tree, and only
+    /// the current one is guaranteed to hold the install that is actually run.
+    func testTheNewestNodeVersionWins() throws {
+        let home = try makeHome(executablesAt: [".nvm/versions/node/v20.20.2/bin/claude",
+                                                ".nvm/versions/node/v22.22.3/bin/claude"])
+
+        let found = ClaudeUsageCLI.locate(home: home, root: home)?.binary.path
+
+        XCTAssertEqual(found?.contains("v22.22.3"), true, "expected v22.22.3, got \(found ?? "nil")")
+    }
+
+    /// Volta and pnpm keep a single stable bin directory of their own, outside
+    /// every path the installers use.
+    func testItFindsClaudeInAVoltaShimDirectory() throws {
+        let home = try makeHome(executablesAt: [".volta/bin/claude"])
+
+        XCTAssertNotNil(ClaudeUsageCLI.locate(home: home, root: home))
+    }
+
+    func testItFindsClaudeInPnpmsGlobalBin() throws {
+        let home = try makeHome(executablesAt: ["Library/pnpm/claude"])
+
+        XCTAssertNotNil(ClaudeUsageCLI.locate(home: home, root: home))
+    }
+
+    /// The native installer still wins when both are present: it is the layout
+    /// Claude Code keeps up to date itself.
+    func testTheNativeInstallerOutranksANodeManager() throws {
+        let home = try makeHome(executablesAt: [".nvm/versions/node/v22.22.3/bin/claude",
+                                                ".local/bin/claude"])
+
+        XCTAssertEqual(ClaudeUsageCLI.locate(home: home, root: home)?.binary.path,
+                       home.appendingPathComponent(".local/bin/claude").path)
+    }
+
+    private func makeHome(executablesAt paths: [String]) throws -> URL {
+        let root = try makeHome(executableAt: nil)
+        for path in paths {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: url.path, contents: Data(),
+                                           attributes: [.posixPermissions: 0o755])
+        }
+        return root
     }
 
     private func makeHome(executableAt path: String?, executable: Bool = true) throws -> URL {

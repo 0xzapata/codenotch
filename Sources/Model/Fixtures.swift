@@ -15,9 +15,9 @@ enum Fixtures {
                 fidelity: .derived,
                 status: .ok,
                 windows: [
-                    LimitWindow(id: "claude.session", label: "Current session",
+                    LimitWindow(id: "claude.session", label: L10n.t("Current session"),
                                 usedFraction: 0.73, resetsAt: sessionReset),
-                    LimitWindow(id: "claude.all", label: "All models",
+                    LimitWindow(id: "claude.all", label: L10n.t("All models"),
                                 usedFraction: 0.07, resetsAt: midnight)
                 ]
             ),
@@ -28,7 +28,7 @@ enum Fixtures {
                 fidelity: .manual,
                 status: .ok,
                 windows: [
-                    LimitWindow(id: "openai.session", label: "Current session",
+                    LimitWindow(id: "openai.session", label: L10n.t("Current session"),
                                 usedFraction: 0.21, resetsAt: now.addingTimeInterval(3 * 60 * 60))
                 ]
             ),
@@ -39,7 +39,7 @@ enum Fixtures {
                 fidelity: .manual,
                 status: .ok,
                 windows: [
-                    LimitWindow(id: "third.daily", label: "Daily quota",
+                    LimitWindow(id: "third.daily", label: L10n.t("Daily quota"),
                                 usedFraction: 0.52, resetsAt: midnight)
                 ]
             )

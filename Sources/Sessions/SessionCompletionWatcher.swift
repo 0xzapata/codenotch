@@ -70,6 +70,7 @@ struct SessionCompletionWatcher {
     static func reason(from was: AgentSession.State, to now: AgentSession.State) -> Reason? {
         guard was == .busy else { return nil }
         switch now {
+        case .success: return .finished
         case .idle:    return .finished
         case .waiting: return .blocked
         case .busy:    return nil

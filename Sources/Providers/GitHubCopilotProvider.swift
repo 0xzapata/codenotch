@@ -18,7 +18,7 @@ actor GitHubCopilotProvider: UsageProvider {
     }
 
     nonisolated var signInRoute: SignInRoute {
-        .guidance("Sign in with GitHub CLI using `gh auth login`, then enable GitHub Copilot.")
+        .command("gh auth login", name: "GitHub", install: URL(string: "https://cli.github.com"))
     }
 
     nonisolated func account() -> ProviderAccount? {
@@ -55,7 +55,8 @@ actor GitHubCopilotProvider: UsageProvider {
             status: .ok,
             windows: windows,
             headlineID: windows.contains { $0.id == "premium_interactions" }
-                ? "premium_interactions" : windows.first?.id
+                ? "premium_interactions" : windows.first?.id,
+            plan: GitHubCopilotUsage.plan(from: data)
         )
     }
 }
@@ -167,6 +168,13 @@ struct GitHubCopilotCredentials: Sendable {
 enum GitHubCopilotUsage {
     private static let order = ["premium_interactions", "chat", "completions"]
 
+    static func plan(from data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return ((root["copilot_plan"] as? String) ?? (root["plan"] as? String))?.nonEmptyPlan
+    }
+
     static func windows(from data: Data) throws -> [LimitWindow] {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let quotas = root["quota_snapshots"] as? [String: Any]
@@ -178,7 +186,7 @@ enum GitHubCopilotUsage {
             return window(id: key, quota: quota, root: root)
         }
         guard !windows.isEmpty else {
-            throw UsageProviderError.nothingMetered("GitHub Copilot reported no metered quotas")
+            throw UsageProviderError.nothingMetered(L10n.t("GitHub Copilot reported no metered quotas"))
         }
         return windows
     }

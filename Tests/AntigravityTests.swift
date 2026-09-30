@@ -56,6 +56,20 @@ final class AntigravityCredentialsTests: XCTestCase {
     func testGarbageIsRejectedRatherThanCrashing() {
         XCTAssertNil(AntigravityCredentials.decode(Data("not base64 at all".utf8)))
     }
+
+    func testCredentialsCarriesProjectAndEmail() {
+        let creds = AntigravityCredentials(
+            accessToken: "token-123",
+            expiresAt: Date().addingTimeInterval(3600),
+            authMethod: "consumer",
+            projectId: "aicode-consumers",
+            email: "user@example.com"
+        )
+        XCTAssertEqual(creds.accessToken, "token-123")
+        XCTAssertEqual(creds.projectId, "aicode-consumers")
+        XCTAssertEqual(creds.email, "user@example.com")
+        XCTAssertFalse(creds.isExpired)
+    }
 }
 
 final class AntigravityTierTests: XCTestCase {
@@ -122,6 +136,158 @@ final class AntigravityActivityTests: XCTestCase {
     }
 
     private let noon = ISO8601DateFormatter().date(from: "2026-08-31T12:00:00Z")!
+
+    /// A second install, so the roots can be tested the way they actually
+    /// occur: several directories, only one of them in use.
+    private func makeRoot() throws -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("antigravity-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    private func write(_ lines: [String], to root: URL, trajectory: String) throws {
+        let dir = root.appendingPathComponent("\(trajectory)/.system_generated/logs")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try lines.joined(separator: "\n")
+            .write(to: dir.appendingPathComponent("transcript.jsonl"),
+                   atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - More than one install
+
+    /// The bug this fixes. Leaving a flavour of Antigravity behind leaves its
+    /// directory behind, so a machine that has run the IDE and moved to the CLI
+    /// has both — and reading only the first one found reported nothing while
+    /// the transcripts sat one directory over.
+    func testAnEmptyInstallBesideAUsedOneDoesNotHideIt() throws {
+        let empty = try makeRoot()
+        let used = try makeRoot()
+        try write([step("2026-08-31T09:00:00Z", source: "MODEL")], to: used, trajectory: "a")
+
+        XCTAssertEqual(AntigravityActivity.read(roots: [empty, used], now: noon).requestsToday, 1)
+    }
+
+    /// One person, one account, one number for the day.
+    func testTwoInstallsAddUp() throws {
+        let ide = try makeRoot()
+        let cli = try makeRoot()
+        try write([step("2026-08-31T09:00:00Z", source: "MODEL")], to: ide, trajectory: "a")
+        try write([step("2026-08-31T10:00:00Z", source: "MODEL"),
+                   step("2026-08-31T11:00:00Z", source: "MODEL")], to: cli, trajectory: "b")
+
+        XCTAssertEqual(AntigravityActivity.read(roots: [ide, cli], now: noon).requestsToday, 3)
+    }
+
+    func testTheNewestRequestWinsAcrossInstalls() throws {
+        let older = try makeRoot()
+        let newer = try makeRoot()
+        try write([step("2026-08-31T09:00:00Z", source: "MODEL")], to: older, trajectory: "a")
+        try write([step("2026-08-31T11:00:00Z", source: "MODEL")], to: newer, trajectory: "b")
+
+        XCTAssertEqual(AntigravityActivity.read(roots: [older, newer], now: noon).lastRequest,
+                       ISO8601DateFormatter().date(from: "2026-08-31T11:00:00Z"))
+    }
+
+    func testNoInstallsAtAllIsNotAnError() {
+        XCTAssertEqual(AntigravityActivity.read(roots: [], now: noon).requestsToday, 0)
+    }
+
+    /// The bug itself, at the point it was made: choosing between the
+    /// directories rather than reading all of them.
+    ///
+    /// All four exist on a machine that has run more than one flavour — nothing
+    /// removes the old one — so "the first that exists" is not a choice between
+    /// a real install and a missing one. It picked an empty directory while the
+    /// transcripts sat in the next.
+    func testEveryInstallsBrainIsFoundNotJustTheFirst() throws {
+        let home = try makeRoot()
+        let gemini = home.appendingPathComponent(".gemini")
+        for name in ["antigravity", "antigravity-backup", "antigravity-cli", "antigravity-ide"] {
+            try FileManager.default.createDirectory(
+                at: gemini.appendingPathComponent("\(name)/brain"),
+                withIntermediateDirectories: true
+            )
+        }
+        // Something else living under `.gemini` is not an Antigravity install.
+        try FileManager.default.createDirectory(
+            at: gemini.appendingPathComponent("history"), withIntermediateDirectories: true
+        )
+
+        let roots = AntigravityActivity.transcriptRoots(home: home)
+
+        XCTAssertEqual(roots.count, 4, "found \(roots.map(\.path))")
+        XCTAssertTrue(roots.allSatisfy { $0.lastPathComponent == "brain" })
+        XCTAssertTrue(roots.contains { $0.path.contains("antigravity-cli") })
+    }
+
+    /// A directory without a `brain` is not one to read from.
+    func testAnInstallWithNoBrainIsSkipped() throws {
+        let home = try makeRoot()
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".gemini/antigravity-cli"),
+            withIntermediateDirectories: true
+        )
+
+        XCTAssertTrue(AntigravityActivity.transcriptRoots(home: home).isEmpty)
+    }
+
+    // MARK: - What the row is called
+
+    /// A bare `0` reads as the app having found nothing, which is also what the
+    /// wrong directory looked like. Saying when it was last used tells them
+    /// apart.
+    func testAQuietDayNamesTheLastTimeItWasUsed() throws {
+        try write([step("2026-08-28T09:00:00Z", source: "MODEL")], to: root, trajectory: "a")
+
+        XCTAssertEqual(AntigravityActivity.read(roots: [root], now: noon).label(now: noon),
+                       "Requests today · last used 3 days ago")
+    }
+
+    func testYesterdayIsNamedAsYesterday() throws {
+        try write([step("2026-08-30T09:00:00Z", source: "MODEL")], to: root, trajectory: "a")
+
+        XCTAssertEqual(AntigravityActivity.read(roots: [root], now: noon).label(now: noon),
+                       "Requests today · last used yesterday")
+    }
+
+    /// Counted in calendar days, like `requestsToday` itself. Measured in
+    /// elapsed hours instead, a late evening reads as "3 hr ago" rather than
+    /// yesterday, and the row's two halves disagree about what a day is.
+    ///
+    /// Built from the local calendar rather than from fixed UTC strings: which
+    /// calendar day an instant falls on is exactly what is under test, so a
+    /// literal `Z` timestamp would pass or fail on the machine's own timezone.
+    func testTheEveningBeforeIsStillYesterday() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let earlyMorning = calendar.date(
+            from: DateComponents(year: 2026, month: 8, day: 31, hour: 1)
+        )!
+        let previousEvening = calendar.date(byAdding: .hour, value: -3, to: earlyMorning)!
+
+        let stamp = ISO8601DateFormatter().string(from: previousEvening)
+        try write([step(stamp, source: "MODEL")], to: root, trajectory: "a")
+
+        XCTAssertEqual(AntigravityActivity.read(roots: [root], now: earlyMorning)
+                           .label(now: earlyMorning),
+                       "Requests today · last used yesterday")
+    }
+
+    /// A day with work on it says nothing about recency — the count is the
+    /// answer, and the old wording is still the right one.
+    func testABusyDayKeepsThePlainLabel() throws {
+        try write([step("2026-08-31T09:00:00Z", source: "MODEL")], to: root, trajectory: "a")
+
+        XCTAssertEqual(AntigravityActivity.read(roots: [root], now: noon).label(now: noon),
+                       "Requests today · no limit published")
+    }
+
+    func testNothingEverRecordedKeepsThePlainLabel() {
+        XCTAssertEqual(AntigravityActivity.read(roots: [], now: noon).label(now: noon),
+                       "Requests today · no limit published")
+    }
 
     /// The real transcript interleaves user input and system checkpoints with
     /// model answers. Counting those would inflate the figure with work the
@@ -203,6 +369,135 @@ final class AntigravityQuotaTests: XCTestCase {
         XCTAssertEqual(windows.count, 1)
         XCTAssertEqual(windows.first?.usedFraction ?? 0, 0.25, accuracy: 0.0001)
         XCTAssertEqual(windows.first?.label, "Daily")
+    }
+
+    func testItParsesDirectCloudCodeRetrieveUserQuotaBuckets() throws {
+        let now = Date(timeIntervalSince1970: 1788900000)
+        let body = Data("""
+        {
+          "buckets": [
+            {
+              "tokenType": "WTUS",
+              "modelId": "claude-sonnet-4-6",
+              "remainingFraction": 0.75,
+              "resetTime": "2026-09-09T10:39:57Z"
+            },
+            {
+              "tokenType": "WTUS",
+              "modelId": "claude-opus-4-6-thinking",
+              "remainingFraction": 0.85,
+              "resetTime": "2026-09-16T18:00:12Z"
+            },
+            {
+              "tokenType": "WTUS",
+              "modelId": "gemini-3.7-flash-tiered",
+              "remainingFraction": 0.90,
+              "resetTime": "2026-09-09T10:39:57Z"
+            },
+            {
+              "tokenType": "WTUS",
+              "modelId": "gemini-2.5-pro",
+              "remainingFraction": 0.80,
+              "resetTime": "2026-09-16T10:39:57Z"
+            }
+          ]
+        }
+        """.utf8)
+        let windows = AntigravityProvider.windows(in: body, now: now)
+        XCTAssertEqual(windows.count, 4)
+
+        let geminiHourly = try XCTUnwrap(windows.first(where: { $0.id == "gemini-hourly" }))
+        XCTAssertEqual(geminiHourly.group, "Gemini Models")
+        XCTAssertEqual(geminiHourly.label, "5-hour Limit")
+        XCTAssertEqual(geminiHourly.usedFraction ?? 0, 0.10, accuracy: 0.0001)
+
+        let geminiWeekly = try XCTUnwrap(windows.first(where: { $0.id == "gemini-weekly" }))
+        XCTAssertEqual(geminiWeekly.group, "Gemini Models")
+        XCTAssertEqual(geminiWeekly.label, "Weekly Limit")
+        XCTAssertEqual(geminiWeekly.usedFraction ?? 0, 0.20, accuracy: 0.0001)
+
+        let thirdPartyHourly = try XCTUnwrap(windows.first(where: { $0.id == "3p-hourly" }))
+        XCTAssertEqual(thirdPartyHourly.group, "Claude and GPT models")
+        XCTAssertEqual(thirdPartyHourly.label, "5-hour Limit")
+        XCTAssertEqual(thirdPartyHourly.usedFraction ?? 0, 0.25, accuracy: 0.0001)
+
+        let thirdPartyWeekly = try XCTUnwrap(windows.first(where: { $0.id == "3p-weekly" }))
+        XCTAssertEqual(thirdPartyWeekly.group, "Claude and GPT models")
+        XCTAssertEqual(thirdPartyWeekly.label, "Weekly Limit")
+        XCTAssertEqual(thirdPartyWeekly.usedFraction ?? 0, 0.15, accuracy: 0.0001)
+    }
+
+    func testCodexBarQuotaSummaryEnvelopeIsNormalizedForEverySource() throws {
+        let body = Data("""
+        {
+          "groups": [
+            {
+              "displayName": "Gemini Models",
+              "buckets": [
+                {
+                  "bucketId": "gemini-5h",
+                  "displayName": "5-hour Limit",
+                  "remaining": {"case": "remainingFraction", "value": 0.86}
+                },
+                {
+                  "bucketId": "gemini-weekly",
+                  "displayName": "Weekly Limit",
+                  "remaining": {"remainingFraction": 0.55}
+                }
+              ]
+            },
+            {
+              "displayName": "Claude and GPT models",
+              "buckets": [
+                {
+                  "bucketId": "3p-5h",
+                  "displayName": "5-hour Limit",
+                  "remainingFraction": 1
+                },
+                {
+                  "bucketId": "3p-weekly",
+                  "displayName": "Weekly Limit",
+                  "remainingFraction": 1
+                }
+              ]
+            }
+          ]
+        }
+        """.utf8)
+
+        let providerWindows = AntigravityProvider.windows(in: body)
+        let bridgeWindows = AntigravityBridge.windows(in: body)
+
+        XCTAssertEqual(bridgeWindows, providerWindows)
+        XCTAssertEqual(providerWindows.count, 4)
+        XCTAssertEqual(providerWindows[0].id, "gemini-5h")
+        XCTAssertEqual(providerWindows[1].id, "gemini-weekly")
+        XCTAssertEqual(providerWindows[2].id, "3p-5h")
+        XCTAssertEqual(providerWindows[3].id, "3p-weekly")
+        XCTAssertEqual(providerWindows[0].duration, 5 * 3600)
+        XCTAssertEqual(providerWindows[1].duration, 7 * 86400)
+        XCTAssertEqual(providerWindows[2].duration, 5 * 3600)
+        XCTAssertEqual(providerWindows[3].duration, 7 * 86400)
+        XCTAssertEqual(providerWindows[0].usedFraction ?? -1, 0.14, accuracy: 0.0001)
+        XCTAssertEqual(providerWindows[1].usedFraction ?? -1, 0.45, accuracy: 0.0001)
+        XCTAssertEqual(providerWindows[2].usedFraction ?? -1, 0, accuracy: 0.0001)
+        XCTAssertEqual(providerWindows[3].usedFraction ?? -1, 0, accuracy: 0.0001)
+    }
+
+    func testDirectCloudCodeIgnoresInvalidFractions() {
+        let body = Data("""
+        {
+          "buckets": [
+            {"modelId": "gemini-bad-over", "remainingFraction": 1.5},
+            {"modelId": "gemini-bad-under", "remainingFraction": -0.1},
+            {"modelId": "gemini-3.7-flash", "remainingFraction": 0.4}
+          ]
+        }
+        """.utf8)
+        let windows = AntigravityProvider.windows(in: body)
+        XCTAssertEqual(windows.count, 1)
+        XCTAssertEqual(windows.first?.id, "gemini-hourly")
+        XCTAssertEqual(windows.first?.usedFraction ?? 0, 0.6, accuracy: 0.0001)
     }
 
     /// Cursor's free plan reports an included limit of zero, and dividing by it
@@ -355,6 +650,63 @@ final class AntigravityBridgeTests: XCTestCase {
         XCTAssertNil(AntigravityBridge.discover(processTable: table, listeningPorts: { _ in [] }))
     }
 
+    // MARK: - The CLI is an install too
+
+    /// Antigravity ships a CLI as well as an IDE, and it serves the same RPC.
+    /// Looking only for `language_server --csrf_token` meant someone who uses
+    /// `agy` and never installs the IDE got the counted-requests fallback while
+    /// a real quota was being served on loopback the whole time.
+    func testTheCLIIsFoundAndAsksForNoToken() throws {
+        let table = """
+        1 /sbin/launchd
+        34221 agy
+        """
+        let endpoint = try XCTUnwrap(
+            AntigravityBridge.discover(processTable: table, listeningPorts: { pid in
+                XCTAssertEqual(pid, 34221)
+                return [54166, 54167]
+            })
+        )
+
+        XCTAssertNil(endpoint.csrfToken, "the CLI serves this without one")
+        XCTAssertEqual(endpoint.ports, [54166, 54167])
+    }
+
+    func testTheCLIIsFoundByItsFullPathToo() throws {
+        let table = "700 /Users/someone/.local/bin/agy"
+        let endpoint = try XCTUnwrap(
+            AntigravityBridge.discover(processTable: table, listeningPorts: { _ in [9000] })
+        )
+
+        XCTAssertNil(endpoint.csrfToken)
+    }
+
+    /// The IDE keeps its place: it is the one that needs the token, and sending
+    /// none to it is the one way to be refused.
+    func testTheIDEWinsWhenBothAreRunning() throws {
+        let table = """
+        29283 /Applications/Antigravity.app/Contents/Resources/bin/language_server --csrf_token abc
+        34221 agy
+        """
+        let endpoint = try XCTUnwrap(
+            AntigravityBridge.discover(processTable: table, listeningPorts: { _ in [1] })
+        )
+
+        XCTAssertEqual(endpoint.csrfToken, "abc")
+    }
+
+    /// "agy" is three letters and turns up inside real words and real paths, so
+    /// the executable's own name is what is matched — not the line.
+    func testSomethingElseWithAgyInItIsNotTheCLI() {
+        for command in ["/opt/legacy/bin/server", "/usr/bin/agyllomerate", "500 imagy-daemon"] {
+            XCTAssertNil(
+                AntigravityBridge.discover(processTable: "500 \(command)",
+                                           listeningPorts: { _ in [1] }),
+                "\(command) was taken for the Antigravity CLI"
+            )
+        }
+    }
+
     func testItParsesPortsFromLSOF() {
         let output = """
         language_server 29283 vinz 12u IPv4 0x1 0t0 TCP 127.0.0.1:63881 (LISTEN)
@@ -368,6 +720,17 @@ final class AntigravityBridgeTests: XCTestCase {
 /// hourly — so it is read about hourly, not twice a minute.
 final class CredentialCacheTests: XCTestCase {
     private struct Token { let expired: Bool }
+
+    /// -60008 is what a refusal looks like when a prompt was needed and could
+    /// not be shown — seen five seconds before a clamshell sleep. It has to
+    /// age the reading like a dark wake does, not sign the account out.
+    func testAPromptThatCouldNotBeShownIsTransientNotASignOut() {
+        XCTAssertTrue(ClaudeCredentials.wasTransient(-60008))
+        XCTAssertTrue(ClaudeCredentials.wasTransient(-25320))
+        XCTAssertFalse(ClaudeCredentials.wasTransient(errSecItemNotFound))
+        XCTAssertFalse(ClaudeCredentials.wasTransient(errSecAuthFailed),
+                       "an explicit refusal stays a refusal, and is not re-asked on a timer")
+    }
 
     func testItReadsOnceAndThenHoldsWhatItHas() throws {
         var reads = 0
@@ -423,15 +786,20 @@ final class CredentialCacheTests: XCTestCase {
         XCTAssertEqual(reads, 2, "it never looked again at all")
     }
 
-    /// One refusal must not become a refusal a minute. macOS said no; asking
-    /// again on the next tick is what the user experiences as "it keeps asking
-    /// even though I chose Always Allow".
+    /// One refusal must not become a refusal a minute — *when it is a real
+    /// one*. `isPermanentFailure` is what says so: without it, this same
+    /// `Denied` would default to being retried after `retryAfterFailure`,
+    /// exactly like the dark-wake case below. The distinction is real macOS
+    /// UI (`errSecAuthFailed`/`errSecUserCanceled`/`errSecInteractionNotAllowed`)
+    /// saying no, and asking again on the next tick is what the user
+    /// experiences as "it keeps asking even though I chose Always Allow".
     func testARefusalIsNeverRetriedWhileTheItemIsUnchanged() {
         struct Denied: Error {}
         var reads = 0
         var clock = Date(timeIntervalSince1970: 0)
         var stamp = Date(timeIntervalSince1970: 1_000)
-        let cache = CredentialCache<Token>(now: { clock }) { $0.expired }
+        let cache = CredentialCache<Token>(now: { clock }, isPermanentFailure: { $0 is Denied },
+                                           isExpired: { $0.expired })
 
         // A good read first, so there is something to fall back on.
         _ = try? cache.value(itemModifiedAt: { stamp }) { reads += 1; return Token(expired: true) }
@@ -524,6 +892,91 @@ final class CredentialCacheTests: XCTestCase {
         _ = try? cache.value { () -> Token in reads += 1; throw Nope() }
         XCTAssertEqual(reads, 2, "it never looked again at all")
     }
+
+    // MARK: - Transient failures: dark wake, and anything else unclassified
+
+    /// The bug this section exists to pin down. `errSecInDarkWake` — macOS
+    /// refusing a keychain read because the Mac is in a brief low-power wake
+    /// with no UI possible — used to be cached exactly like a permanent
+    /// refusal, for as long as the item's `mdat` stayed the same. Nothing
+    /// touches the item again once it holds a valid token, so on a real
+    /// machine one unlucky read landed during dark wake and every read for
+    /// the next three hours replayed that single failure — the notch said
+    /// "Sign in to Claude Code" long after the saved login was fine again,
+    /// because nothing here ever asked macOS a second time.
+    ///
+    /// An error with no `isPermanentFailure` classifier — the default, and
+    /// what `errSecInDarkWake` gets, since it says nothing about the
+    /// credential itself — is retried after `retryAfterFailure` even while
+    /// `mdat` has not moved, which a permanent refusal (above) never is.
+    func testATransientFailureIsRetriedAfterTheWindowEvenWithTheSameMdat() {
+        struct DarkWake: Error {}
+        var reads = 0
+        var clock = Date(timeIntervalSince1970: 0)
+        let stamp = Date(timeIntervalSince1970: 1_000)
+        let cache = CredentialCache<Token>(now: { clock }, isExpired: { $0.expired })
+
+        _ = try? cache.value(itemModifiedAt: { stamp }) { () -> Token in
+            reads += 1; throw DarkWake()
+        }
+        XCTAssertEqual(reads, 1)
+
+        // Before the window: the same failure, without asking macOS again.
+        clock.addTimeInterval(4 * 60 + 59)
+        XCTAssertThrowsError(try cache.value(itemModifiedAt: { stamp }) { () -> Token in
+            reads += 1; throw DarkWake()
+        }) { XCTAssertTrue($0 is DarkWake) }
+        XCTAssertEqual(reads, 1, "still cached — the window has not passed yet")
+
+        // Past it, `mdat` still exactly the same: this is the fix. The old
+        // logic only ever asked "did the item change".
+        clock.addTimeInterval(2)
+        let recovered = try? cache.value(itemModifiedAt: { stamp }) {
+            reads += 1; return Token(expired: false)
+        }
+        XCTAssertNotNil(recovered, "the window passing must trigger a real retry")
+        XCTAssertEqual(reads, 2)
+    }
+
+    /// A repeated transient failure still respects the backoff — the fix is
+    /// "eventually retry", not "retry on every call".
+    func testARepeatedTransientFailureStillBacksOff() {
+        struct DarkWake: Error {}
+        var reads = 0
+        var clock = Date(timeIntervalSince1970: 0)
+        let stamp = Date(timeIntervalSince1970: 1_000)
+        let cache = CredentialCache<Token>(now: { clock }, isExpired: { $0.expired })
+
+        for _ in 0..<20 {
+            _ = try? cache.value(itemModifiedAt: { stamp }) { () -> Token in
+                reads += 1; throw DarkWake()
+            }
+            clock.addTimeInterval(10)
+        }
+        // 200s in 10s steps, all inside the 300s default window.
+        XCTAssertEqual(reads, 1, "hammering the cache must not hammer the keychain")
+    }
+
+    /// A rotation is picked up immediately even behind a transient failure —
+    /// the same guarantee `testARotationIsStillWorthAskingForAfterARefusal`
+    /// gives a permanent one, so a real renewal is never made to wait out a
+    /// backoff that exists for the opposite case.
+    func testARotationIsPickedUpImmediatelyAfterATransientFailure() {
+        struct DarkWake: Error {}
+        var reads = 0
+        var stamp = Date(timeIntervalSince1970: 1_000)
+        let cache = CredentialCache<Token>(isExpired: { $0.expired })
+
+        _ = try? cache.value(itemModifiedAt: { stamp }) { () -> Token in
+            reads += 1; throw DarkWake()
+        }
+        stamp = Date(timeIntervalSince1970: 2_000)   // renewed moments later
+        let renewed = try? cache.value(itemModifiedAt: { stamp }) {
+            reads += 1; return Token(expired: false)
+        }
+        XCTAssertNotNil(renewed)
+        XCTAssertEqual(reads, 2, "a real renewal must not wait out a backoff that exists for a different reason")
+    }
 }
 
 /// Antigravity had no activity monitor at all, so its ring never showed the
@@ -544,11 +997,11 @@ final class AntigravityActivityMonitorTests: XCTestCase {
     }
 
     @discardableResult
-    private func transcript(_ name: String, modified: Date) throws -> URL {
+    private func transcript(_ name: String, modified: Date, content: String = "{\"type\": \"USER_INPUT\"}") throws -> URL {
         let dir = root.appendingPathComponent("\(name)/.system_generated/logs")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent("transcript.jsonl")
-        try "{}".write(to: file, atomically: true, encoding: .utf8)
+        try content.write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.modificationDate: modified],
                                               ofItemAtPath: file.path)
         return file
@@ -575,6 +1028,21 @@ final class AntigravityActivityMonitorTests: XCTestCase {
         let sessions = AntigravityActivityMonitor.read(root: root, staleAfter: 45)
         XCTAssertEqual(sessions.count, 1)
         XCTAssertEqual(sessions.first?.id, "antigravity.live")
+    }
+
+    func testAnIdleTranscriptIsCleanedUpQuickly() throws {
+        try transcript("idle", modified: Date().addingTimeInterval(-10), content: "{\"type\": \"PLANNER_RESPONSE\"}")
+        let sessions = AntigravityActivityMonitor.read(root: root, staleAfter: 45)
+        XCTAssertTrue(sessions.isEmpty)
+    }
+
+    func testAWaitingTranscriptPersists() throws {
+        let waitingJSON = "{\"type\": \"PLANNER_RESPONSE\", \"tool_calls\": [{\"name\": \"ask_question\"}]}"
+        try transcript("waiting", modified: Date().addingTimeInterval(-600), content: waitingJSON)
+        let sessions = AntigravityActivityMonitor.read(root: root, staleAfter: 45)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.state, .waiting)
+        XCTAssertEqual(sessions.first?.detail, "Question")
     }
 
     func testNoTranscriptsIsQuietRatherThanAnError() {
@@ -626,6 +1094,7 @@ final class FirstRunCopyTests: XCTestCase {
                             switchAccount: { _ in true },
                             retry: { _ in },
                             resetPosition: {},
+                            quit: {},
                             updater: Updater())
     }
 
@@ -641,12 +1110,14 @@ final class FirstRunCopyTests: XCTestCase {
                       "nothing warns that the Claude app is not Claude Code")
     }
 
-    /// The keychain prompt is the only interruption in the whole first run, and
-    /// choosing Allow rather than Always Allow is what makes it recur.
+    /// The keychain prompt is explained before it appears: that it only comes
+    /// from Allow access…, and that Deny is honoured (#98). "Always Allow"
+    /// cannot outlast these items (#72), so the copy must not promise it.
     func testTheKeychainPromptIsExplainedBeforeItAppears() {
         let copy = SettingsView.keychainCopy
-        XCTAssertTrue(copy.contains("Always Allow"))
-        XCTAssertTrue(copy.lowercased().contains("macos will ask"))
+        XCTAssertTrue(copy.contains("Allow access…"))
+        XCTAssertTrue(copy.contains("Deny"))
+        XCTAssertFalse(copy.contains("Always Allow"))
     }
 }
 
@@ -956,12 +1427,49 @@ final class KeychainRefusalTests: XCTestCase {
         )
         let message = snapshot.statusMessage ?? ""
         XCTAssertTrue(message.contains("refused"))
-        XCTAssertTrue(message.contains("Always Allow"))
+        XCTAssertTrue(message.contains("Allow access"),
+                      "it has to name the control that actually asks again")
         XCTAssertFalse(message.contains("Sign in"), "it tells a signed-in user to sign in")
+        XCTAssertFalse(message.contains("ring"),
+                       "clicking a ring only refreshes, and a refresh never prompts")
+        XCTAssertFalse(message.contains("fix-keychain"),
+                       "the script is in the repository, not in the installed app")
     }
 
     /// The credential is still valid — we were simply not let in to re-read it.
     /// Throwing the last reading away would punish a mis-click.
+    /// An emptied credential is not the same as never having signed in, and
+    /// the difference is the whole point: the last reading survives. Claude
+    /// Code empties every profile at once after it updates itself, and blanking
+    /// the rings turned an overnight glitch into "the app lost my data".
+    func testAnEmptiedCredentialKeepsTheLastReading() {
+        XCTAssertFalse(UsageStore.supersedesHistory(.signedOutByOwner))
+    }
+
+    /// Whereas a profile nobody ever signed into has nothing worth keeping.
+    func testNeverSignedInStillClearsTheHistory() {
+        XCTAssertTrue(UsageStore.supersedesHistory(.needsAuth))
+    }
+
+    func testAnEmptiedCredentialMapsToItsOwnStatus() {
+        guard case .signedOutByOwner =
+            UsageStore.statusForTesting(UsageProviderError.signedOutByOwner) else {
+            return XCTFail("an emptied credential was reported as something else")
+        }
+    }
+
+    func testTheMessageNamesTheCauseAndSaysSignInAgain() {
+        let snapshot = ProviderSnapshot(
+            id: "claude-work", displayName: "Claude (work)", glyph: .claude,
+            fidelity: .official, status: .signedOutByOwner, windows: []
+        )
+        let message = snapshot.statusMessage ?? ""
+        XCTAssertTrue(message.contains("Claude Code emptied"))
+        XCTAssertTrue(message.contains("updates itself"),
+                      "it has to name the trigger, or this reads as our bug")
+        XCTAssertTrue(message.contains("Sign in again"))
+    }
+
     func testARefusalKeepsTheLastReading() {
         XCTAssertFalse(UsageStore.supersedesHistory(.accessDenied))
     }

@@ -8,40 +8,56 @@ enum ResetTimeFormat: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .automatic: return "Reset date"
-        case .remaining: return "Time remaining"
+        case .automatic: return L10n.t("Reset date")
+        case .remaining: return L10n.t("Time remaining")
         }
     }
 
     var explanation: String {
         switch self {
         case .automatic:
-            return "Minutes under an hour; otherwise the reset date and time."
+            return L10n.t("Minutes under an hour; otherwise the reset date and time.")
         case .remaining:
-            return "Time until usage resets, such as 3 Days 3h or 3h 20m."
+            return L10n.t("Time until usage resets, such as 3 Days 3h or 3h 20m.")
         }
     }
 }
 
-/// "Resets in 51 min" under an hour, "Resets Thu 12:00 AM" within the week,
-/// "Resets Sep 28" beyond it.
+/// "Resets in 42 sec" inside the last minute, "Resets in 51 min" under an hour,
+/// "Resets Thu 12:00 AM" within the week, "Resets Sep 28" beyond it.
 enum ResetCopy {
     static func text(for resetsAt: Date, now: Date = Date(), calendar: Calendar = .current,
-                     format: ResetTimeFormat = .automatic) -> String {
+                     format: ResetTimeFormat = .automatic, locale: Locale = L10n.locale) -> String {
         let seconds = resetsAt.timeIntervalSince(now)
-        guard seconds > 0 else { return "Resetting…" }
+        guard seconds > 0 else { return L10n.t("Resetting…", locale: locale) }
+
+        // Under a minute the sentence counted in minutes, so it read "Resets in
+        // 1 min" for anything from one second to fifty-nine of them — the one
+        // stretch where the exact figure is the whole point, and the only one
+        // where "1 min" could mean four seconds. Both formats get the seconds;
+        // the card is redrawn every second while it is open.
+        //
+        // Rounded like the minutes below, and for the same reason a value that
+        // rounds to sixty falls through rather than being clamped: "Resets in
+        // 60 sec" never appears, "Resets in 1 min" does.
+        let wholeSeconds = Int(seconds.rounded())
+        if wholeSeconds < 60 {
+            return L10n.t("Resets in \(max(1, wholeSeconds)) sec", locale: locale)
+        }
 
         if format == .remaining {
             let minutes = max(1, Int((seconds / 60).rounded()))
             let hours = minutes / 60
             let days = hours / 24
             if days > 0 {
-                return "Resets in \(days) \(days == 1 ? "Day" : "Days") \(hours % 24)h"
+                return days == 1
+                    ? L10n.t("Resets in \(days) Day \(hours % 24)h", locale: locale)
+                    : L10n.t("Resets in \(days) Days \(hours % 24)h", locale: locale)
             }
             if hours > 0 {
-                return "Resets in \(hours)h \(minutes % 60)m"
+                return L10n.t("Resets in \(hours)h \(minutes % 60)m", locale: locale)
             }
-            return "Resets in \(minutes) min"
+            return L10n.t("Resets in \(minutes) min", locale: locale)
         }
 
         // Rounding, not truncation, so 50m40s reads as 51 rather than 50. A
@@ -49,10 +65,11 @@ enum ResetCopy {
         // "Resets in 60 min" never appears.
         let minutes = Int((seconds / 60).rounded())
         if minutes < 60 {
-            return "Resets in \(max(1, minutes)) min"
+            return L10n.t("Resets in \(max(1, minutes)) min", locale: locale)
         }
 
         let formatter = formatter(for: calendar)
+        formatter.locale = locale
 
         // A weekday only identifies a day inside the coming week. Codex's
         // monthly window resets 26 days out, and "Resets Mon 3:55 PM" read as
@@ -62,15 +79,62 @@ enum ResetCopy {
             // Day and month only, matching how the vendors write it. A time
             // that far out is noise: nobody plans around 3:55 PM in four weeks.
             formatter.setLocalizedDateFormatFromTemplate("MMM d")
-            return "Resets \(formatter.string(from: resetsAt))"
+            return L10n.t("Resets \(formatter.string(from: resetsAt))", locale: locale)
         }
 
-        // A literal pattern rather than a localised template: the weekday and
-        // AM/PM still come from the locale, but the separator stays a colon.
-        // The template form yields "4.50 PM" in some regions, and both the
-        // design frame and Claude's own usage panel write "4:50 PM".
-        formatter.dateFormat = "E h:mm a"
-        return "Resets \(formatter.string(from: resetsAt))"
+        // `j`, not `h`: a literal hour symbol in a template pins the clock to
+        // twelve hours whatever the region, so everywhere that writes 00:00
+        // rather than 12:00 AM — most of Europe, Asia and Latin America — read
+        // "Resets mer. 12:00 AM" here while every other clock on the Mac said
+        // 00:00. `j` asks the locale, which also carries the "24-Hour Time"
+        // switch in System Settings. Regions that write AM/PM keep it, so
+        // English is still "Thu 12:00 AM".
+        formatter.setLocalizedDateFormatFromTemplate("E j:mm")
+        return L10n.t("Resets \(formatter.string(from: resetsAt))", locale: locale)
+    }
+
+    /// The time left before a reset, as short as the menu bar needs it: "2h 05m",
+    /// "47m", "09s". Nil once the reset has passed — a window that is over has
+    /// no time left to show, and never a negative one.
+    ///
+    /// Truncated where `text` rounds. This one is read against a clock, so it
+    /// may never claim more time than there is: "09s" is always at least nine
+    /// seconds, and "1h 00m" is gone the moment the hour is.
+    static func countdown(to resetsAt: Date, now: Date = Date(),
+                          locale: Locale = L10n.locale) -> String? {
+        let seconds = resetsAt.timeIntervalSince(now)
+        guard seconds > 0 else { return nil }
+        let minutes = Int(seconds / 60)
+        // The last minute counts in seconds. "<1m" was true for fifty-nine of
+        // them and said nothing about which — and it is the minute somebody is
+        // actually watching the bar for. Truncated, like the minutes below and
+        // for the reason in the doc comment: "09s" is always at least nine
+        // seconds, never ten. Two digits, so the figure does not change width
+        // as it falls.
+        if minutes < 1 {
+            let padded = String(format: "%02d", Int(seconds))
+            return L10n.t("\(padded)s", locale: locale)
+        }
+        if minutes < 60 { return L10n.t("\(minutes)m", locale: locale) }
+        // Two digits, so "2h 05m" is as wide as "2h 50m" and whatever sits
+        // beside it in the menu bar does not shuffle as the minutes tick over.
+        let padded = String(format: "%02d", minutes % 60)
+        return L10n.t("\(minutes / 60)h \(padded)m", locale: locale)
+    }
+
+    /// When `countdown` next reads differently — the next whole second of time
+    /// left inside the last minute, the next whole minute above it, or the reset
+    /// itself. Nil once it has passed.
+    ///
+    /// The menu bar wakes itself on this and nothing else, so it is the only
+    /// thing deciding how often the item is redrawn: once a minute for four
+    /// hours and fifty-nine minutes of a five-hour window, then once a second
+    /// for the last sixty.
+    static func nextCountdownChange(to resetsAt: Date, now: Date = Date()) -> Date? {
+        let seconds = resetsAt.timeIntervalSince(now)
+        guard seconds > 0 else { return nil }
+        let step: TimeInterval = seconds <= 60 ? 1 : 60
+        return resetsAt.addingTimeInterval(-(seconds / step).rounded(.down) * step)
     }
 
     /// A formatter that renders in the given calendar's own zone.
@@ -84,7 +148,7 @@ enum ResetCopy {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
-        formatter.locale = calendar.locale ?? .current
+        formatter.locale = calendar.locale ?? L10n.locale
         return formatter
     }
 

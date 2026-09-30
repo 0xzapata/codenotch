@@ -49,7 +49,7 @@ final class WhatsNewWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "What's New"
+        window.title = L10n.t("What's New")
         window.contentView = NSHostingView(
             rootView: WhatsNewView(note: note) { [weak self] in self?.dismiss() }
                 .tint(preferences.accentColor.color)

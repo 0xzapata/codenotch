@@ -7,6 +7,7 @@ on:
 
 jobs:
   test:
+    if: github.repository == 'vinzdg/codenotch'
     name: Unit tests
     # macOS 26, because that is what the app targets. An older image ships an
     # Xcode that cannot read the project at all — `objectVersion 77` is a
@@ -14,7 +15,7 @@ jobs:
     # deployment target or the Liquid Glass APIs the settings panel uses.
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Printed rather than assumed: when this job fails on a runner image
       # change, the toolchain is the first thing worth seeing.
@@ -33,3 +34,6 @@ jobs:
       # read fixtures rather than keychains — see `make test-ci`.
       - name: Run unit tests
         run: make test-ci
+
+      - name: Verify SwiftPM resolution
+        run: make verify-deps

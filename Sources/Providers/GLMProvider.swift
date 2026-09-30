@@ -34,8 +34,7 @@ actor GLMProvider: UsageProvider {
     }
 
     nonisolated var signInRoute: SignInRoute {
-        .guidance("Usage rides on a Z.ai GLM Coding Plan key held by a coding tool — Claude "
-                  + "Code's settings.json, ZCode or OpenCode. Set one up there and the notch reads it.")
+        .guidance(L10n.t("Usage rides on a Z.ai GLM Coding Plan key held by a coding tool — Claude Code's settings.json, ZCode or OpenCode. Set one up there and the notch reads it."))
     }
 
     nonisolated func forgetCachedCredential() {
@@ -66,6 +65,11 @@ actor GLMProvider: UsageProvider {
         // reading them puts no prompt in front of anyone, which is why this
         // provider needs none of Claude's credential caching.
         guard let credentials = GLMCredentials.load() else {
+            if GLMCredentials.zcodeHasStartPlan() {
+                throw UsageProviderError.nothingMetered(
+                    L10n.t("Z.ai does not publish usage for the GLM Start Plan yet, so there is nothing to read. The Coding Plan is supported.")
+                )
+            }
             throw UsageProviderError.needsAuth
         }
 
@@ -85,7 +89,9 @@ actor GLMProvider: UsageProvider {
                 fidelity: .official,
                 status: .ok,
                 windows: payload.windows,
-                headlineID: "session"
+                headlineID: "session",
+                weeklyID: "weekly",
+                plan: payload.level?.nonEmptyPlan
             )
         } catch UsageProviderError.rateLimited(let retryAfter) {
             // Bookkeeping where the answer was, not down in `fetch`: the wait

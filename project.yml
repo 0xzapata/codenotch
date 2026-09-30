@@ -4,6 +4,7 @@ options:
   deploymentTarget:
     macOS: "15.0"
   createIntermediateGroups: true
+  defaultLocalization: en
 
 settings:
   base:
@@ -13,8 +14,8 @@ settings:
     # Sources/Info.plist reads both from here — hardcoding them there instead
     # silently pins every build to one version, so no customer ever sees an
     # update. Bump CURRENT_PROJECT_VERSION on every release.
-    MARKETING_VERSION: "1.6.0"
-    CURRENT_PROJECT_VERSION: "8"
+    MARKETING_VERSION: "1.20.0"
+    CURRENT_PROJECT_VERSION: "22"
     # Signed with a stable identity on purpose. The app reads Claude Code's
     # OAuth token out of the login keychain, and the keychain's ACL remembers
     # *which signed binary* was allowed. Ad-hoc or unsigned builds get a new
@@ -35,6 +36,9 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
 
 packages:
+  SwiftNIO:
+    url: https://github.com/apple/swift-nio
+    from: "2.102.0"
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: "2.6.0"
@@ -45,8 +49,18 @@ targets:
     platform: macOS
     sources:
       - path: Sources
+        excludes:
+          # Notes for whoever next re-generates the vendored decoder. Left in the
+          # navigator beside the code it describes, but Xcode would otherwise
+          # copy any unrecognised file into the app bundle's Resources, and a
+          # developer README has no business shipping to users.
+          - "Vendor/**/README.md"
     dependencies:
       - package: Sparkle
+      - package: SwiftNIO
+        product: NIOHTTP1
+      - package: SwiftNIO
+        product: NIOPosix
     info:
       path: Sources/Info.plist
       properties:
@@ -56,17 +70,28 @@ targets:
         # and no obvious way to reach settings or quit.
         CFBundleName: Codenotch
         CFBundleDisplayName: Codenotch
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations:
+          - en
+          - fr
+          - de
+          - id
+          - ja
+          - ko
+          - pt-BR
+          - ru
+          - zh-Hans
+          - zh-Hant
+          - uk
+          - uz
+          - tr
         LSMinimumSystemVersion: "15.0"
-        # A router is often on a LAN box over plain http; ATS already exempts
-        # loopback, this extends the exemption to local addresses only, and
-        # leaves every public host on https.
-        NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
         # Sources/Info.plist is *generated* from this block, so editing that
         # file directly is undone by the next `make gen`. Pointing both at the
         # build settings keeps one place to bump.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSLocalNetworkUsageDescription: "Codenotch answers your phone on this network so it can show your usage."
         # --- Sparkle -------------------------------------------------------
         # Beside the download itself, on hivinz.com. It used to point at a
         # GitHub Pages URL for a repo that was never created, so every check
@@ -85,13 +110,24 @@ targets:
         # shows a "check for updates automatically?" prompt, which is exactly
         # the permission this is meant to avoid.
         SUEnableAutomaticChecks: true
-        SUAutomaticallyUpdate: true
+        # Never downloads unasked: a new version is offered in the notch and
+        # installed when Update is chosen — see `Updater`.
+        SUAutomaticallyUpdate: false
         SUScheduledCheckInterval: 86400
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vinz.codenotch
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+        DEVELOPMENT_LANGUAGE: en
+        # The only C in the project is the vendored Zstandard decoder, and this
+        # is how Swift sees it. It is needed because Claude Desktop's HTTP cache
+        # stores bodies with `content-encoding: zstd` and macOS ships no zstd
+        # anywhere a signed, notarized app can reach — see
+        # Sources/Vendor/zstd/README.md. Delete this line and that directory
+        # together if the Desktop source is ever dropped.
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Codenotch-Bridging-Header.h
 
   CodenotchTests:
     type: bundle.unit-test

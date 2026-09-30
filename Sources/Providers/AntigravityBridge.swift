@@ -22,7 +22,10 @@ enum AntigravityBridge {
         /// this RPC, and which is which is not advertised — so both are tried
         /// rather than guessed at.
         let ports: [Int]
-        let csrfToken: String
+        /// Nil for the CLI, which serves this RPC to anything on loopback. The
+        /// IDE's language server refuses without one, so it is still sent
+        /// wherever there is one to send.
+        let csrfToken: String?
     }
 
     /// Antigravity is built on Codeium's stack, and the header still says so.
@@ -43,13 +46,42 @@ enum AntigravityBridge {
     static func discover(processTable: String? = nil, listeningPorts: ((Int) -> [Int])? = nil)
         -> Endpoint? {
         let table = processTable ?? run("/bin/ps", ["-Ao", "pid,command"])
-        guard let line = table.split(separator: "\n").first(where: {
-            $0.contains("language_server") && $0.contains("--csrf_token")
-        }) else { return nil }
+        let lines = table.split(separator: "\n")
 
-        guard let token = value(of: "--csrf_token", in: String(line)),
-              let pid = Int(line.trimmingCharacters(in: .whitespaces)
-                  .split(separator: " ").first ?? "")
+        // The IDE's language server, which is the one that carries a token.
+        if let line = lines.first(where: {
+            $0.contains("language_server") && $0.contains("--csrf_token")
+        }),
+           let token = value(of: "--csrf_token", in: String(line)),
+           let endpoint = endpoint(for: line, token: token, ports: listeningPorts) {
+            return endpoint
+        }
+
+        // Then the CLI, which serves the same RPC and is a whole install of its
+        // own — somebody who uses `agy` and never installs the IDE has a real
+        // quota to read and was getting the counted-requests fallback instead.
+        // It asks for no token: on loopback it answers anyone.
+        if let line = lines.first(where: isCLI),
+           let endpoint = endpoint(for: line, token: nil, ports: listeningPorts) {
+            return endpoint
+        }
+        return nil
+    }
+
+    /// The CLI runs as plain `agy`, so match the executable's name rather than
+    /// looking for it anywhere in the line — "agy" is three letters and turns
+    /// up inside real words and real paths.
+    static func isCLI(_ line: Substring) -> Bool {
+        let fields = line.trimmingCharacters(in: .whitespaces).split(separator: " ")
+        guard fields.count >= 2 else { return false }
+        return URL(fileURLWithPath: String(fields[1])).lastPathComponent == "agy"
+    }
+
+    private static func endpoint(
+        for line: Substring, token: String?, ports listeningPorts: ((Int) -> [Int])?
+    ) -> Endpoint? {
+        guard let pid = Int(line.trimmingCharacters(in: .whitespaces)
+            .split(separator: " ").first ?? "")
         else { return nil }
 
         let ports = listeningPorts?(pid) ?? self.listeningPorts(ofPID: pid)
@@ -100,14 +132,16 @@ enum AntigravityBridge {
         return []
     }
 
-    private static func quota(port: Int, token: String,
+    private static func quota(port: Int, token: String?,
                               session: URLSession) async throws -> [LimitWindow] {
         var request = URLRequest(
             url: URL(string: "https://127.0.0.1:\(port)\(service)")!
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(token, forHTTPHeaderField: csrfHeader)
+        // Only where there is one. Sending an empty header instead of none is
+        // not the same request, and the CLI has no token to send.
+        if let token { request.setValue(token, forHTTPHeaderField: csrfHeader) }
         // `forceRefresh` is why this reads as live rather than as whatever was
         // last looked at. The language server keeps a `QuotaSummaryCache`, and
         // an empty request is served from it — so the figure only moved when
@@ -132,51 +166,11 @@ enum AntigravityBridge {
     /// The server reports what is **left**, not what is spent — the notch shows
     /// the opposite, so every fraction is inverted here rather than in the view,
     /// where it would be a percentage whose meaning depended on the provider.
-    static func windows(in data: Data) -> [LimitWindow] {
-        struct Response: Decodable {
-            struct Bucket: Decodable {
-                let bucketId: String?
-                let displayName: String?
-                let remainingFraction: Double?
-                let resetTime: String?
-                let window: String?
-            }
-            struct Group: Decodable {
-                let displayName: String?
-                let buckets: [Bucket]?
-            }
-            struct Body: Decodable { let groups: [Group]? }
-            let response: Body?
-        }
-
-        guard let decoded = try? JSONDecoder().decode(Response.self, from: data),
-              let groups = decoded.response?.groups
-        else { return [] }
-
-        return groups.flatMap { group -> [LimitWindow] in
-            (group.buckets ?? []).compactMap { bucket in
-                guard let remaining = bucket.remainingFraction,
-                      remaining >= 0, remaining <= 1
-                else { return nil }
-                let id = bucket.bucketId ?? group.displayName ?? "quota"
-                
-                var bucketLabel = bucket.displayName ?? "Usage"
-                if bucketLabel.hasSuffix(" Remaining") {
-                    bucketLabel = String(bucketLabel.dropLast(" Remaining".count))
-                }
-                
-                let groupLabel = group.displayName ?? ""
-
-                return LimitWindow(
-                    id: id,
-                    group: groupLabel.isEmpty ? nil : groupLabel,
-                    label: bucketLabel,
-                    usedFraction: 1 - remaining,
-                    resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse),
-                    duration: bucket.window == "weekly" ? 7 * 86400 : nil
-                )
-            }
-        }
+    static func windows(in data: Data, now: Date = Date()) -> [LimitWindow] {
+        // Keep the loopback and direct Cloud Code paths on one parser. Their
+        // envelopes drift independently; normalizing them in one place prevents
+        // the same account from changing shape when the source changes.
+        AntigravityProvider.windows(in: data, now: now)
     }
 
     // MARK: - Plumbing

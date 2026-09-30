@@ -22,7 +22,7 @@ actor OllamaProvider: UsageProvider {
     }
 
     nonisolated var signInRoute: SignInRoute {
-        .guidance("Enter an Ollama API key below, or export OLLAMA_API_KEY in your shell.")
+        .guidance(L10n.t("Enter an Ollama API key below, or export OLLAMA_API_KEY in your shell."))
     }
 
     nonisolated func account() -> ProviderAccount? {
@@ -52,7 +52,7 @@ actor OllamaProvider: UsageProvider {
         }
 
         let body = String(data: data, encoding: .utf8) ?? ""
-        Log.usage.debug("ollama usage -> \(body.prefix(900), privacy: .public)")
+        Log.usage.debug("ollama usage -> \(body.prefix(900), privacy: .private)")
 
         let result = try OllamaUsage.parse(body)
         return ProviderSnapshot(
@@ -62,7 +62,8 @@ actor OllamaProvider: UsageProvider {
             fidelity: .official,
             status: .ok,
             windows: result.windows,
-            headlineID: result.headlineID
+            headlineID: result.headlineID,
+            weeklyID: "weekly"
         )
     }
 
@@ -71,7 +72,6 @@ actor OllamaProvider: UsageProvider {
     }
 
     nonisolated func forgetCachedCredential() {
-        // Nothing is cached in memory — the key is re-read from the keychain or
-        // environment on every fetch.
+        OllamaCredentials.forgetCached()
     }
 }

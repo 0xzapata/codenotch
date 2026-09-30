@@ -29,7 +29,7 @@ actor CommandCodeProvider: UsageProvider {
     }
 
     nonisolated var signInRoute: SignInRoute {
-        .guidance("Sign in with the Command Code app — it writes ~/.commandcode/auth.json and the notch reads it.")
+        .guidance(L10n.t("Sign in with the Command Code app — it writes ~/.commandcode/auth.json and the notch reads it."))
     }
 
     nonisolated func forgetCachedCredential() {
@@ -102,7 +102,9 @@ actor CommandCodeProvider: UsageProvider {
                 fidelity: .official,
                 status: .ok,
                 windows: windows,
-                headlineID: "monthly"
+                headlineID: "monthly",
+                weeklyID: "weekly",
+                plan: lastKnownPlan?.nonEmptyPlan
             )
         } catch UsageProviderError.rateLimited(let retryAfter) {
             consecutiveRateLimits += 1

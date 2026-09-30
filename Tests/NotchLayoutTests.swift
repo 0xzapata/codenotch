@@ -44,6 +44,12 @@ final class NotchLayoutTests: XCTestCase {
 
     /// The session list is extra card, so the hover region has to grow with it
     /// or the pointer falls out of the bottom of a card it is still over.
+    func testCardGrowsWhenAPlanSitsUnderTheTitle() {
+        let bare = NotchLayout.cardHeight(windowCount: 2)
+        let named = NotchLayout.cardHeight(windowCount: 2, hasPlan: true)
+        XCTAssertEqual(named - bare, NotchLayout.cardBodyLineHeight, accuracy: 0.001)
+    }
+
     func testCardGrowsWithTheSessionList() {
         let bare = NotchLayout.cardHeight(windowCount: 2)
         let one = NotchLayout.cardHeight(windowCount: 2, sessionCount: 1)
@@ -66,19 +72,53 @@ final class NotchLayoutTests: XCTestCase {
         XCTAssertGreaterThan(innerEdge, NotchLayout.glyphSize / 2)
     }
 
-    /// The weekly arc is the session arc's equal in weight and shares its
-    /// track: a gap apart from the outer arc, and never past the track's
-    /// inner edge or into the activity ring.
-    func testSecondaryArcSharesTheTrackWithTheMainArc() {
-        XCTAssertEqual(NotchLayout.secondaryStroke, NotchLayout.progressStroke)
-        let mainInner = NotchLayout.ringDiameter / 2 - NotchLayout.progressStroke
-        let outer = NotchLayout.secondaryDiameter / 2 + NotchLayout.secondaryStroke / 2
-        let inner = NotchLayout.secondaryDiameter / 2 - NotchLayout.secondaryStroke / 2
-        let trackInnerEdge = NotchLayout.ringDiameter / 2 - NotchLayout.trackStroke
-        let activityOuterEdge = NotchLayout.activityDiameter / 2 + NotchLayout.activityStroke / 2
-        XCTAssertEqual(outer, mainInner - NotchLayout.arcGap, accuracy: 0.001)
-        XCTAssertGreaterThanOrEqual(inner, trackInnerEdge - 0.001)
-        XCTAssertGreaterThan(inner, activityOuterEdge)
+    /// The weekly ring is placed against what is already inside the circle
+    /// rather than quoted from the design frame, which draws one ring — so the
+    /// clearances are what the test states, not the numbers.
+    func testTheInsideWeeklyRingClearsTheGlyphAndTheWorkingIndicator() {
+        let outer = NotchLayout.weeklyInsideRadius + NotchLayout.weeklyRingStroke / 2
+        let inner = NotchLayout.weeklyInsideRadius - NotchLayout.weeklyRingStroke / 2
+        XCTAssertGreaterThan(inner, NotchLayout.glyphSize / 2,
+                             "the weekly ring is drawn over the glyph")
+        XCTAssertLessThan(outer,
+                          NotchLayout.activityDiameter / 2 - NotchLayout.activityStroke / 2,
+                          "the weekly ring collides with the working indicator")
+    }
+
+    /// Outside, the two things it must not touch are the track it sits beyond
+    /// and the bezel the notch keeps clear of.
+    func testTheOutsideWeeklyRingClearsTheTrackAndTheBezel() {
+        let inner = NotchLayout.weeklyOutsideRadius - NotchLayout.weeklyRingStroke / 2
+        let outer = NotchLayout.weeklyOutsideRadius + NotchLayout.weeklyRingStroke / 2
+        XCTAssertGreaterThan(inner, NotchLayout.ringDiameter / 2,
+                             "the weekly ring overlaps the track it is meant to sit outside")
+        XCTAssertLessThan(outer, NotchLayout.ringDiameter / 2 + NotchLayout.ringMargin(for: .right),
+                          "the weekly ring reaches past the bezel")
+    }
+
+    /// Thinner than the headline arc: same kind of fact, lesser claim on the eye.
+    func testTheWeeklyRingIsThinnerThanTheHeadline() {
+        XCTAssertLessThan(NotchLayout.weeklyRingStroke, NotchLayout.progressStroke)
+    }
+
+    /// A tiny real fraction still has to draw as an arc, not collapse into a
+    /// dot that reads as a status light. `nil` (no reading) keeps the full ring.
+    func testASmallContextStillReadsAsAnArc() {
+        XCTAssertEqual(ProviderRing.localSweep(for: 0.01), NotchLayout.localArcMinimumSweep, accuracy: 0.0001)
+        XCTAssertEqual(ProviderRing.localSweep(for: 0), NotchLayout.localArcMinimumSweep, accuracy: 0.0001)
+        XCTAssertEqual(ProviderRing.localSweep(for: 0.5), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(ProviderRing.localSweep(for: 1.7), 1, accuracy: 0.0001)
+        XCTAssertEqual(ProviderRing.localSweep(for: nil), 1, accuracy: 0.0001, "no reading still draws the whole ring")
+    }
+
+    /// The floor has to actually clear the two round caps drawn at the ends of
+    /// the arc, or the "minimum arc" is still just a dot; and it has to stay
+    /// small enough that it never reads as a genuine reading.
+    func testTheMinimumArcIsLongerThanItsCaps() {
+        let arcBody = NotchLayout.localArcMinimumSweep * .pi
+            * (NotchLayout.ringDiameter - NotchLayout.progressStroke)
+        XCTAssertGreaterThan(arcBody, 2 * NotchLayout.progressStroke)
+        XCTAssertLessThan(NotchLayout.localArcMinimumSweep, 0.1)
     }
 
     /// Every cell's tooltip has to fit inside the panel, or the card would be
@@ -166,9 +206,9 @@ final class FoldedNotchTests: XCTestCase {
     func testFoldingKeepsTheCentreLine() {
         let m = model(cells: 3)
         m.isExpanded = true
-        let openCentre = m.notchLeadingInset + m.notchSize.height / 2
+        let openCentre = m.notchAlongLead + m.notchSize.height * m.sizeScale / 2
         m.isExpanded = false
-        let foldedCentre = m.notchLeadingInset + m.notchSize.height / 2
+        let foldedCentre = m.notchAlongLead + m.notchSize.height * m.sizeScale / 2
         XCTAssertEqual(openCentre, foldedCentre, accuracy: 0.001)
     }
 
@@ -414,6 +454,16 @@ final class SettingsOrbTests: XCTestCase {
     func testTheHitRegionIsLargerThanTheOrb() {
         XCTAssertGreaterThan(NotchLayout.orbHotZone, NotchLayout.orbDiameter)
     }
+
+    /// The glass arc is masked by this path inside the view's bounds, so a band
+    /// running along the frame's edge would lose the outer half of its stroke.
+    func testTheArcBandStaysInsideItsFrame() {
+        let frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let path = ArcBand(trim: 0...0.25, lineWidth: NotchLayout.orbStroke).path(in: frame)
+        XCTAssertFalse(path.isEmpty)
+        XCTAssertTrue(frame.insetBy(dx: -0.5, dy: -0.5).contains(path.boundingRect),
+                      "\(path.boundingRect) escapes the band's frame")
+    }
 }
 
 /// Hiding a provider is stored as the hidden set, so one added in a later
@@ -450,7 +500,8 @@ final class PreferencesTests: XCTestCase {
     func testEverythingIsConnectedByDefault() {
         let p = preferences()
         XCTAssertTrue(p.isConnected("claude"))
-        XCTAssertTrue(p.isConnected("a-provider-that-does-not-exist-yet"))
+        XCTAssertTrue(p.isConnected("codex"))
+        XCTAssertFalse(p.isConnected("a-provider-that-does-not-exist-yet"))
     }
 
     func testConnectingAndDisconnectingRoundTrips() {
@@ -506,6 +557,38 @@ final class PreferencesTests: XCTestCase {
         defaults.set("ultraviolet", forKey: "accentColor")
 
         XCTAssertEqual(Preferences(defaults: defaults).accentColor, .system)
+    }
+
+    func testSurfaceStyleDefaultsToLiquidGlass() {
+        XCTAssertEqual(preferences().notchSurfaceStyle, .glass)
+    }
+
+    func testSurfaceStyleSurvivesARestart() {
+        let name = "PreferencesSurfaceStyleTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+
+        Preferences(defaults: defaults).notchSurfaceStyle = .solid
+        XCTAssertEqual(Preferences(defaults: defaults).notchSurfaceStyle, .solid)
+    }
+
+    func testDarkGlassSurvivesARestart() {
+        let name = "PreferencesDarkGlassTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        addTeardownBlock { defaults.removePersistentDomain(forName: name) }
+
+        Preferences(defaults: defaults).notchSurfaceStyle = .darkGlass
+        XCTAssertEqual(Preferences(defaults: defaults).notchSurfaceStyle, .darkGlass)
+    }
+
+    func testAnUnknownSurfaceStyleFallsBackToLiquidGlass() {
+        let name = "PreferencesSurfaceStyleFallbackTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        defaults.set("frosted", forKey: "notchSurfaceStyle")
+
+        XCTAssertEqual(Preferences(defaults: defaults).notchSurfaceStyle, .glass)
     }
 
     /// The key is deliberately unchanged across the rename, so choices made
@@ -591,6 +674,58 @@ final class PreferencesTests: XCTestCase {
 
         XCTAssertNil(Preferences(defaults: defaults).geminiAPIMonthlyTokenBudget)
         XCTAssertNil(Preferences.storedGeminiAPIMonthlyTokenBudget(defaults: defaults))
+    }
+}
+
+/// The two glass styles differ in the `Glass` variant they ask for (`.regular`
+/// for `glass`, `.clear` for `darkGlass`) and the wash drawn beneath it
+/// (`glassDim`: nil for `glass`, `Palette.darkGlassDim` for `darkGlass`).
+/// Both are pinned on the enum so the views cannot drift apart.
+final class NotchSurfaceStyleTests: XCTestCase {
+    func testTheStylesAreOfferedGlassFirst() {
+        XCTAssertEqual(NotchSurfaceStyle.allCases, [.glass, .darkGlass, .solid])
+    }
+
+    func testOnlyDarkGlassCarriesADimBeneathTheGlass() {
+        XCTAssertNil(NotchSurfaceStyle.glass.glassDim)
+        XCTAssertNil(NotchSurfaceStyle.solid.glassDim)
+        guard NotchSurfaceStyle.glassAvailable else { return }
+        XCTAssertNotNil(NotchSurfaceStyle.darkGlass.glassDim)
+    }
+
+    /// A black `tint` on adaptive `.regular` glass rendered lighter, not
+    /// darker, so `darkGlass` asks for the clear variant and does its own
+    /// darkening underneath. `glass` must keep asking for plain `.regular`.
+    func testDarkGlassAsksForClearGlassAndGlassForRegular() throws {
+        guard #available(macOS 26.0, *) else {
+            throw XCTSkip("Glass does not exist before macOS 26")
+        }
+        XCTAssertEqual(NotchSurfaceStyle.darkGlass.glass, .clear)
+        XCTAssertEqual(NotchSurfaceStyle.glass.glass, .regular)
+    }
+
+    func testSolidIsNotGlass() {
+        XCTAssertFalse(NotchSurfaceStyle.solid.isGlass)
+    }
+
+    /// Dark glass is glass, so it still draws a `glassEffect`; it is the panel
+    /// appearance, not the material, that keeps it dark.
+    func testDarkGlassIsGlassWhereThereIsGlass() {
+        guard NotchSurfaceStyle.glassAvailable else {
+            XCTAssertFalse(NotchSurfaceStyle.darkGlass.isGlass)
+            return
+        }
+        XCTAssertTrue(NotchSurfaceStyle.darkGlass.isGlass)
+        XCTAssertEqual(NotchSurfaceStyle.darkGlass.effective, .darkGlass)
+    }
+
+    func testDarkGlassPinsTheDarkAppearanceAndGlassDoesNot() {
+        XCTAssertEqual(
+            NotchSurfaceStyle.darkGlass.panelAppearance(reduceTransparency: false)?.name, .darkAqua,
+            "dark glass has to keep Palette's frame hexes whatever the Mac's appearance"
+        )
+        guard NotchSurfaceStyle.glassAvailable else { return }
+        XCTAssertNil(NotchSurfaceStyle.glass.panelAppearance(reduceTransparency: false))
     }
 }
 
@@ -1091,7 +1226,6 @@ final class SessionCapTests: XCTestCase {
             let model = NotchViewModel()
             model.edge = .right
             model.screenSize = CGSize(width: 1512, height: height)
-            model.screenUsableSize = CGSize(width: 1512, height: height - 37)
             XCTAssertLessThanOrEqual(
                 model.panelSize(cellCount: 4).height, height,
                 "the panel runs off a \(height)pt screen"
@@ -1100,17 +1234,15 @@ final class SessionCapTests: XCTestCase {
     }
 
     /// A top or bottom notch spends the card's height reaching inward instead,
-    /// against the usable screen — it starts below the menu bar, so the menu
-    /// bar is room it never had.
-    @MainActor func testAHorizontalNotchStaysWithinTheUsableScreen() {
+    /// against the full screen, starting at the physical bezel.
+    @MainActor func testAHorizontalNotchStaysWithinThePhysicalScreen() {
         for height in stride(from: CGFloat(900), through: 2000, by: 23) {
             for edge in [NotchEdge.top, .bottom] {
                 let model = NotchViewModel()
                 model.edge = edge
                 model.screenSize = CGSize(width: 1512, height: height)
-                model.screenUsableSize = CGSize(width: 1512, height: height - 37)
                 XCTAssertLessThanOrEqual(
-                    model.panelSize(cellCount: 4).height, height - 37,
+                    model.panelSize(cellCount: 4).height, height,
                     "\(edge): the panel runs off a \(height)pt screen"
                 )
             }
@@ -1318,7 +1450,7 @@ final class NotchSizeTests: XCTestCase {
     func testTheTooltipKeepsItsOwnSizeWhateverTheNotchIs() {
         let large = model(scale: 1.25)
         let medium = model(scale: 1)
-        let notchShare = medium.contentInset + NotchLayout.bodyDepth(for: .right)
+        let notchShare = NotchLayout.bodyDepth(for: .right)
 
         XCTAssertEqual(large.panelSize(cellCount: 3).width - medium.panelSize(cellCount: 3).width,
                        notchShare * 0.25, accuracy: 0.001)

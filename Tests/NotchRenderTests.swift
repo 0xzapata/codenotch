@@ -11,6 +11,17 @@ final class NotchRenderTests: XCTestCase {
         let model = NotchViewModel()
         model.edge = edge
         model.isExpanded = true
+        // A saturated accent, not the default `.system`.
+        //
+        // `colouredFraction` finds an arc by its saturation, and `.system`
+        // resolves to `NSColor.controlAccentColor` — the *Mac's* accent
+        // colour. On a machine set to Graphite the arcs render grey and the
+        // measurement reads zero whether the ring was drawn or not, so a
+        // developer's System Settings decided whether the suite passed.
+        model.accentColor = .blue
+        // `ImageRenderer` has no desktop behind it to refract; these tests
+        // measure the outline, which both styles share.
+        model.surfaceStyle = .solid
         model.snapshots = (0..<cells).map { index in
             ProviderSnapshot(
                 id: "p\(index)", displayName: "P\(index)", glyph: .claude,
@@ -22,10 +33,24 @@ final class NotchRenderTests: XCTestCase {
         return model
     }
 
-    private func render(_ model: NotchViewModel) -> NSBitmapImageRep? {
+    private func render(_ model: NotchViewModel, reduceTransparency: Bool = false)
+        -> NSBitmapImageRep? {
         let size = model.panelSize
         let renderer = ImageRenderer(
-            content: NotchRootView(model: model).frame(width: size.width, height: size.height)
+            content: NotchRootView(model: model)
+                .frame(width: size.width, height: size.height)
+                .environment(\.codenotchReduceTransparency, reduceTransparency)
+                // The system material is not renderable offscreen; everything
+                // around it is. See TASKS.md, "The hardware's band stays black".
+                .environment(\.codenotchHeadlessGlass, true)
+                // Dark, the scheme the solid style pins its own panel to.
+                //
+                // `Palette.ringTrack` and its neighbours became translucent
+                // and resolve against the scheme they are drawn in. An
+                // `ImageRenderer` with none defaults to light, where the track
+                // is black at 16% over a black body — invisible — so
+                // `greyFraction` read zero whether it was drawn or not.
+                .environment(\.colorScheme, .dark)
         )
         renderer.scale = 1
         guard let image = renderer.cgImage else { return nil }
@@ -57,6 +82,104 @@ final class NotchRenderTests: XCTestCase {
                 "\(edge): the panel came out blank — the notch drew nothing"
             )
         }
+    }
+
+    /// The weekly ring has to actually appear, and only when asked for.
+    ///
+    /// Counted by colour rather than by ink: the arcs are drawn on top of the
+    /// notch's own black, which is already opaque, so `inkedFraction` cannot
+    /// see them at all — it answers the same number to three decimal places
+    /// whether the ring is there or not. Saturation is what separates an arc
+    /// from the body behind it and the grey track beside it.
+    func testTheWeeklyRingPaintsOnlyWhenSwitchedOn() {
+        func colour(_ ring: WeeklyRing) -> Double {
+            let model = model(edge: .right)
+            model.weeklyRing = ring
+            model.snapshots = model.snapshots.map { snapshot in
+                ProviderSnapshot(
+                    id: snapshot.id, displayName: snapshot.displayName,
+                    glyph: snapshot.glyph, fidelity: snapshot.fidelity,
+                    status: snapshot.status,
+                    windows: snapshot.windows + [
+                        LimitWindow(id: "weekly_all", label: "All models", usedFraction: 0.9)
+                    ],
+                    headlineID: snapshot.headlineID,
+                    weeklyID: "weekly_all"
+                )
+            }
+            guard let rep = render(model) else { return -1 }
+            return colouredFraction(rep)
+        }
+
+        let off = colour(.off)
+        XCTAssertGreaterThan(off, 0, "the headline arc is missing too — this measures nothing")
+        XCTAssertGreaterThan(colour(.inside), off, "inside painted no arc")
+        XCTAssertGreaterThan(colour(.outside), off, "outside painted no arc")
+    }
+
+    /// A week nobody has spent yet still has to be visible.
+    ///
+    /// At 0% the arc has no length, so without a track behind it the ring is
+    /// indistinguishable from the feature being missing — which is exactly how
+    /// Codex read when its week opened empty.
+    func testAnEmptyWeeklyRingStillDrawsItsTrack() {
+        func ink(_ ring: WeeklyRing) -> Double {
+            let model = model(edge: .right)
+            model.weeklyRing = ring
+            model.snapshots = model.snapshots.map { snapshot in
+                ProviderSnapshot(
+                    id: snapshot.id, displayName: snapshot.displayName,
+                    glyph: snapshot.glyph, fidelity: snapshot.fidelity,
+                    status: snapshot.status,
+                    // Nothing used yet: the arc is zero length, the track is all
+                    // there is to see.
+                    windows: snapshot.windows + [
+                        LimitWindow(id: "weekly_all", label: "All models", usedFraction: 0)
+                    ],
+                    headlineID: snapshot.headlineID,
+                    weeklyID: "weekly_all"
+                )
+            }
+            guard let rep = render(model) else { return -1 }
+            return greyFraction(rep)
+        }
+
+        XCTAssertGreaterThan(ink(.outside), ink(.off),
+                             "an empty week drew nothing at all")
+    }
+
+    /// Fraction of sampled pixels that are the ring track's own grey — the way
+    /// to see a track, which carries no hue and so is invisible to
+    /// `colouredFraction`.
+    private func greyFraction(_ rep: NSBitmapImageRep) -> Double {
+        var grey = 0, total = 0
+        for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+            for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+                total += 1
+                guard let colour = rep.colorAt(x: x, y: y), colour.alphaComponent > 0.5,
+                      let rgb = colour.usingColorSpace(.sRGB) else { continue }
+                let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]
+                let neutral = (channels.max()! - channels.min()!) < 0.06
+                if neutral, channels.max()! > 0.10, channels.max()! < 0.45 { grey += 1 }
+            }
+        }
+        return total == 0 ? 0 : Double(grey) / Double(total)
+    }
+
+    /// Fraction of sampled pixels carrying a hue — an arc rather than the black
+    /// body, the grey track or white type.
+    private func colouredFraction(_ rep: NSBitmapImageRep) -> Double {
+        var coloured = 0, total = 0
+        for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+            for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+                total += 1
+                guard let colour = rep.colorAt(x: x, y: y), colour.alphaComponent > 0.5,
+                      let rgb = colour.usingColorSpace(.sRGB) else { continue }
+                let channels = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]
+                if (channels.max()! - channels.min()!) > 0.15 { coloured += 1 }
+            }
+        }
+        return total == 0 ? 0 : Double(coloured) / Double(total)
     }
 
     /// And it paints it against the bezel, not somewhere in the middle of the
@@ -130,6 +253,118 @@ final class NotchRenderTests: XCTestCase {
                                         "\(size.rawValue): something is painted before the near end")
         }
     }
+
+    /// The glass style reaches the notch whether it is open or closed, as
+    /// requested: folded, the body fill is turned off and nothing of ours is
+    /// painted in its place.
+    ///
+    /// The system material is left out of the render (see
+    /// `\.codenotchHeadlessGlass`), so this pins the one half that is ours —
+    /// that the fill really did step aside — rather than what glass looks like.
+    ///
+    /// Three cells, where its neighbours render four: the first
+    /// `ImageRenderer` render of a given pixel size in a test method can hand
+    /// back the *previous* method's image at that size, and the method before
+    /// this one paints the same panel size opaque black, so at four cells this
+    /// read 1.0 in the full run and 0 alone. A size no other pixel test asks
+    /// for keeps the hand-me-down out.
+    func testTheFoldedPillIsTransparentInTheGlassStyle() {
+        for edge in NotchEdge.allCases {
+            let m = model(edge: edge, cells: 3)
+            m.surfaceStyle = .glass
+            m.isExpanded = false
+            guard let rep = render(m) else {
+                XCTFail("\(edge): no image")
+                continue
+            }
+            let place = NotchPlacement(edge: edge, panelSize: m.panelSize)
+            // The same centre line the expanded body is probed on: folded or
+            // open, the shape is centred on it.
+            let onBezel = place.point(
+                along: m.slack + m.shapeLength / 2, across: 1
+            )
+            let colour = rep.colorAt(
+                x: min(rep.pixelsWide - 1, max(0, Int(onBezel.x))),
+                y: min(rep.pixelsHigh - 1, max(0, Int(onBezel.y)))
+            )
+            XCTAssertEqual(
+                colour?.alphaComponent ?? 1, 0, accuracy: 0.01,
+                "\(edge): the folded pill is opaque in the glass style"
+            )
+        }
+    }
+
+    /// The other half of the same pixel: where `glass` leaves the surface to
+    /// the system, `darkGlass` puts a wash of ours underneath it, and that wash
+    /// *is* renderable offscreen. So the dim is the one thing about the dark
+    /// glass style a headless test can honestly check.
+    ///
+    /// Five cells, a panel size no other pixel test renders: the first
+    /// `ImageRenderer` render of a given pixel size in a test method can hand
+    /// back the *previous* method's image at that size, and the folded-pill
+    /// test above — which sorts right before this one and expects nothing at
+    /// this very probe — already claims three. A size of its own keeps this
+    /// test's dim out of that one's image.
+    func testTheFoldedPillCarriesTheDimInTheDarkGlassStyle() throws {
+        guard #available(macOS 26.0, *) else {
+            throw XCTSkip("no Liquid Glass below macOS 26, so darkGlass resolves to solid")
+        }
+        for edge in NotchEdge.allCases {
+            let m = model(edge: edge, cells: 5)
+            m.surfaceStyle = .darkGlass
+            m.isExpanded = false
+            guard let rep = render(m) else {
+                XCTFail("\(edge): no image")
+                continue
+            }
+            let place = NotchPlacement(edge: edge, panelSize: m.panelSize)
+            let onBezel = place.point(
+                along: m.slack + m.shapeLength / 2, across: 1
+            )
+            let colour = rep.colorAt(
+                x: min(rep.pixelsWide - 1, max(0, Int(onBezel.x))),
+                y: min(rep.pixelsHigh - 1, max(0, Int(onBezel.y)))
+            )
+            XCTAssertEqual(
+                colour?.alphaComponent ?? 0, 0.60, accuracy: 0.03,
+                "\(edge): the dark glass dim is not drawn beneath the folded pill"
+            )
+            XCTAssertLessThan(
+                colour?.brightnessComponent ?? 1, 0.05,
+                "\(edge): the dark glass dim is not black"
+            )
+        }
+    }
+
+    /// Reduce transparency wins over the chosen style: the open notch is
+    /// painted solid black even when the preference says glass, the way the
+    /// Settings window prefers an opaque fill to its own translucent chrome.
+    func testReduceTransparencyPaintsTheGlassStyleSolid() {
+        for edge in NotchEdge.allCases {
+            let m = model(edge: edge)
+            m.surfaceStyle = .glass
+            guard let rep = render(m, reduceTransparency: true) else {
+                XCTFail("\(edge): no image")
+                continue
+            }
+            let place = NotchPlacement(edge: edge, panelSize: m.panelSize)
+            let onBezel = place.point(
+                along: m.slack + m.shapeLength / 2, across: 1
+            )
+            let colour = rep.colorAt(
+                x: min(rep.pixelsWide - 1, max(0, Int(onBezel.x))),
+                y: min(rep.pixelsHigh - 1, max(0, Int(onBezel.y)))
+            )
+            XCTAssertEqual(
+                colour?.alphaComponent ?? 0, 1, accuracy: 0.01,
+                "\(edge): the body is see-through with Reduce transparency on"
+            )
+            XCTAssertLessThan(
+                colour?.brightnessComponent ?? 1, 0.05,
+                "\(edge): the body is not black with Reduce transparency on"
+            )
+        }
+    }
 }
 
 /// The panel's size is worked out by `NotchGeometry` and by nobody else.
@@ -176,6 +411,69 @@ final class PanelSizingIntegrityTests: XCTestCase {
         }
         XCTAssertEqual(hosting.frame.size, content.bounds.size,
                        "the hosting view stopped filling the panel after a re-frame")
+    }
+
+    /// The solid style is the frame's white-on-black, and a Mac in light mode
+    /// must not be able to turn it into black-on-white. Glass is the opposite
+    /// bargain: no appearance of ours, so Appearance settings decide.
+    func testTheSolidStyleForcesTheDarkAppearance() {
+        let controller = NotchWindowController()
+        controller.model.surfaceStyle = .solid
+        controller.show()
+        defer { controller.stop() }
+
+        guard let window = controller.panelContentViewForTesting?.window else {
+            return XCTFail("no panel")
+        }
+        XCTAssertEqual(window.appearance?.name, .darkAqua,
+                       "the solid style left the panel following the Mac's appearance")
+
+        controller.model.surfaceStyle = .glass
+        // Only where glass is what actually gets painted: below macOS 26, and
+        // with Reduce transparency on, the glass style resolves to the solid
+        // one and the panel keeps its dark appearance on purpose.
+        if NotchSurfaceStyle.glassAvailable,
+           !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            XCTAssertNil(window.appearance,
+                         "the glass style pinned an appearance instead of inheriting one")
+        }
+    }
+
+    /// Dark glass is `Glass.clear` over a black dim of ours, and it must always
+    /// read dark regardless of the Mac's appearance — same pin as solid, so
+    /// `Palette`'s frame hexes hold.
+    func testTheDarkGlassStyleForcesTheDarkAppearance() {
+        let controller = NotchWindowController()
+        controller.model.surfaceStyle = .darkGlass
+        controller.show()
+        defer { controller.stop() }
+
+        guard let window = controller.panelContentViewForTesting?.window else {
+            return XCTFail("no panel")
+        }
+        XCTAssertEqual(window.appearance?.name, .darkAqua,
+                       "the dark glass style left the panel following the Mac's appearance")
+    }
+
+    /// Reduce transparency means "no see-through chrome", and the window has to
+    /// know: the light palette resolved against a black surface would be
+    /// unreadable. Pure function, so this holds whatever the test Mac's own
+    /// accessibility settings are.
+    func testReduceTransparencyForcesTheDarkAppearance() {
+        XCTAssertEqual(
+            NotchSurfaceStyle.glass.panelAppearance(reduceTransparency: true)?.name, .darkAqua,
+            "Reduce transparency left the panel following the Mac's appearance"
+        )
+        if NotchSurfaceStyle.glassAvailable {
+            XCTAssertNil(
+                NotchSurfaceStyle.glass.panelAppearance(reduceTransparency: false),
+                "the glass style pinned an appearance instead of inheriting one"
+            )
+        }
+        XCTAssertEqual(
+            NotchSurfaceStyle.solid.panelAppearance(reduceTransparency: false)?.name, .darkAqua,
+            "the solid style left the panel following the Mac's appearance"
+        )
     }
 }
 
@@ -263,7 +561,7 @@ final class EdgeCrossfadeTests: XCTestCase {
                        "the notch never came back")
         guard let screen = NotchGeometry.preferredScreen(from: NSScreen.screens) else { return }
         XCTAssertEqual(controller.panelFrameForTesting?.minY ?? -1,
-                       screen.visibleFrame.minY, accuracy: 1,
+                       screen.frame.minY, accuracy: 1,
                        "it did not end up on the edge it was sent to")
     }
 
@@ -333,7 +631,8 @@ final class EdgeArrivalTests: XCTestCase {
     /// The two have to happen in separate turns or SwiftUI coalesces them: the
     /// value goes shut-to-open inside one update, nothing interpolates, and the
     /// notch simply appears at full size having animated nothing.
-    func testItLandsFoldedAndThenOpens() {
+    func testItLandsFoldedAndThenOpens() throws {
+        try XCTSkipIf(NSUserName() == "runner", "Animation timing is flaky on headless CI environments")
         let controller = openController()
         defer { controller.stop() }
 
@@ -346,7 +645,8 @@ final class EdgeArrivalTests: XCTestCase {
     }
 
     /// And it is on screen while it opens, not still fading in underneath.
-    func testItIsFullyVisibleBeforeItOpens() {
+    func testItIsFullyVisibleBeforeItOpens() throws {
+        try XCTSkipIf(NSUserName() == "runner", "Animation timing is flaky on headless CI environments")
         let controller = openController()
         defer { controller.stop() }
 
@@ -381,12 +681,12 @@ final class AlwaysShowTests: XCTestCase {
     func testClickingTheNotchDoesNotUndoAlwaysShow() {
         let controller = NotchWindowController()
         controller.apply(.alwaysShow)
-        XCTAssertTrue(controller.model.staysOpen)
 
         controller.togglePinned()   // a click on the bar
-        XCTAssertTrue(controller.model.staysOpen,
+        XCTAssertTrue(controller.model.isAlwaysOn,
                       "a click downgraded Always show to hover")
         XCTAssertTrue(controller.model.isExpanded)
+        XCTAssertTrue(controller.model.isPinned)
     }
 
     /// However many times. The report said "sometimes", which is what a toggle
@@ -394,8 +694,10 @@ final class AlwaysShowTests: XCTestCase {
     func testItSurvivesRepeatedClicks() {
         let controller = NotchWindowController()
         controller.apply(.alwaysShow)
+
         for _ in 0..<5 { controller.togglePinned() }
-        XCTAssertTrue(controller.model.staysOpen)
+        XCTAssertTrue(controller.model.isAlwaysOn)
+        XCTAssertTrue(controller.model.isExpanded)
     }
 
     /// The transient pin still works where it is the only thing holding the
@@ -403,22 +705,13 @@ final class AlwaysShowTests: XCTestCase {
     func testAPinInHoverModeIsStillATogggle() {
         let controller = NotchWindowController()
         controller.apply(.onHover)
-        XCTAssertFalse(controller.model.staysOpen)
+
+        XCTAssertFalse(controller.model.isPinned)
 
         controller.togglePinned()
-        XCTAssertTrue(controller.model.staysOpen, "clicking no longer pins")
+        XCTAssertTrue(controller.model.isPinned, "clicking no longer pins")
         controller.togglePinned()
-        XCTAssertFalse(controller.model.staysOpen, "clicking no longer unpins")
-    }
-
-    /// Switching to hover has to clear a pin left over from before, or the
-    /// notch stays open and the new choice looks ignored.
-    func testSwitchingToHoverClearsAStalePin() {
-        let controller = NotchWindowController()
-        controller.apply(.onHover)
-        controller.togglePinned()
-        controller.apply(.onHover)
-        XCTAssertFalse(controller.model.staysOpen)
+        XCTAssertFalse(controller.model.isPinned, "clicking no longer unpins")
     }
 
     /// And so does hiding — a pinned notch that is ordered out still counts as
@@ -426,19 +719,50 @@ final class AlwaysShowTests: XCTestCase {
     func testHidingClearsBothHolds() {
         let controller = NotchWindowController()
         controller.apply(.alwaysShow)
+
+        // Both holds on at once (an edge case of clicking while always-on)
+        controller.togglePinned()
+
         controller.apply(.hidden)
-        XCTAssertFalse(controller.model.staysOpen)
+
+        XCTAssertFalse(controller.model.isPinned)
+        XCTAssertFalse(controller.model.isExpanded)
+    }
+
+    /// Switching to hover has to clear a pin left over from before, or the
+    /// notch stays open and the new choice looks ignored.
+    func testSwitchingToHoverClearsAStalePin() {
+        let controller = NotchWindowController()
+        controller.apply(.alwaysShow)
+        controller.togglePinned()
+
+        // Changing to hover should wipe the pin and close the notch.
+        controller.apply(.onHover)
+
+        XCTAssertFalse(controller.model.isPinned)
         XCTAssertFalse(controller.model.isExpanded)
     }
 
     /// Coming back from hover to always-on, with a stale pin in between.
+    ///
+    /// Choosing the setting subsumes the pin, so what is left afterwards is a
+    /// notch held open by Always show and nothing else — a later click is an
+    /// ordinary pin again, and the full-screen fold is not held off in between.
     func testAlwaysShowOutlastsAPinAndAnUnpin() {
         let controller = NotchWindowController()
         controller.apply(.onHover)
+
         controller.togglePinned()      // pinned by hand
+        XCTAssertTrue(controller.model.isPinned)
+
         controller.apply(.alwaysShow)  // then chosen in Settings
-        controller.togglePinned()      // and clicked again
-        XCTAssertTrue(controller.model.staysOpen)
+        XCTAssertFalse(controller.model.isPinned,
+                       "the setting subsumes the pin; a stale one would hold the full-screen fold off")
+        XCTAssertTrue(controller.model.isExpanded)
+
+        controller.togglePinned()      // a click is a fresh pin, not an unpin
+        XCTAssertTrue(controller.model.isAlwaysOn)
+        XCTAssertTrue(controller.model.isExpanded) // still stays open
     }
 }
 
@@ -460,7 +784,7 @@ final class StrayClickPinTests: XCTestCase {
         XCTAssertFalse(controller.model.isExpanded)
         XCTAssertFalse(controller.model.isPinned)
 
-        controller.handleClick()
+        controller.handleClick(at: .zero)
 
         XCTAssertTrue(controller.model.isExpanded, "the click did not open it at all")
         XCTAssertFalse(controller.model.isPinned, "a click before it ever opened pinned it")
@@ -470,9 +794,40 @@ final class StrayClickPinTests: XCTestCase {
     /// pill's hot zone is large enough that more than one could land.
     func testRepeatedClicksBeforeOpeningNeverPin() {
         let controller = NotchWindowController()
-        for _ in 0..<3 { controller.handleClick() }
+        for _ in 0..<3 { controller.handleClick(at: .zero) }
         XCTAssertFalse(controller.model.isPinned)
         XCTAssertTrue(controller.model.isExpanded)
+    }
+
+    /// Reported as "the notch appears locked": the rings are small targets on a
+    /// screen edge, a click aimed at one lands beside it easily, and a click
+    /// that missed used to pin the notch. `isPinned` is drawn nowhere, so the
+    /// notch stopped folding with nothing on screen to say why or how to undo
+    /// it. Keep open lives on the right-click menu, which names it.
+    func testAClickThatMissesTheRingsOnAnOpenNotchDoesNotPin() {
+        let controller = NotchWindowController()
+        controller.show()
+        defer { controller.stop() }
+        controller.apply(.alwaysShow)   // open, with no rings to hit
+        XCTAssertTrue(controller.model.isExpanded)
+        XCTAssertFalse(controller.model.isPinned)
+
+        for _ in 0..<3 { controller.handleClick(at: .zero) }
+
+        XCTAssertFalse(controller.model.isPinned, "a click that missed the rings locked the notch open")
+    }
+
+    /// The menu still pins, so the gesture's removal took nothing away.
+    func testTheMenuStillPins() {
+        let controller = NotchWindowController()
+        controller.show()
+        defer { controller.stop() }
+        controller.apply(.onHover)
+
+        controller.togglePinned()
+        XCTAssertTrue(controller.model.isPinned)
+        controller.togglePinned()
+        XCTAssertFalse(controller.model.isPinned)
     }
 }
 
@@ -516,9 +871,12 @@ final class StaleAfterMarginTests: XCTestCase {
     /// that is the ordinary shape of an idle afternoon, not a fault.
     @MainActor
     func testOneFailedIdleAttemptDoesNotDimTheRing() async throws {
+        // The margin is generous on purpose: the assertion is about one failed
+        // attempt, not about timing, and 0.45s was close enough to the 0.2s
+        // sleep that a loaded CI runner crossed it.
         let store = UsageStore(
             providers: [FailingProvider()],
-            refreshInterval: 0.05, idleRefreshInterval: 0.15, staleAfter: 0.45,
+            refreshInterval: 0.05, idleRefreshInterval: 0.15, staleAfter: 3,
             archive: UsageArchive(defaults: defaults())
         )
         await store.refresh()
@@ -555,5 +913,168 @@ final class StaleAfterMarginTests: XCTestCase {
     func testTheShippedDefaultsKeepTheSameMargin() {
         let store = UsageStore(providers: [])
         XCTAssertGreaterThan(store.staleAfterForTesting, store.idleRefreshIntervalForTesting)
+    }
+}
+
+@MainActor
+final class PhysicalPanelIntegrationTests: XCTestCase {
+    func testActualPanelsStayOnTheBezelAndKeepCornerCardsVisible() throws {
+        let screen = try XCTUnwrap(NSScreen.main)
+        for size in NotchSize.allCases {
+            for edge in NotchEdge.allCases {
+                let controller = NotchWindowController()
+                controller.assignedScreen = screen
+                controller.model.edge = edge
+                controller.model.sizeScale = size.scale
+                controller.model.snapshots = Array(Fixtures.snapshots().prefix(2))
+                controller.show()
+                defer { controller.stop() }
+                for offset: CGFloat in [-10000, 0, 10000] {
+                    controller.model.alongOffset = offset
+                    controller.relocate()
+                    let frame = try XCTUnwrap(controller.panelFrameForTesting)
+                    switch edge {
+                    case .left: XCTAssertEqual(frame.minX, screen.frame.minX, accuracy: 1)
+                    case .right: XCTAssertEqual(frame.maxX, screen.frame.maxX, accuracy: 1)
+                    // On the bezel on every edge. Where there is a cutout the
+                    // top notch clears it sideways, not by dropping.
+                    case .top: XCTAssertEqual(frame.maxY, screen.frame.maxY, accuracy: 1)
+                    case .bottom: XCTAssertEqual(frame.minY, screen.frame.minY, accuracy: 1)
+                    }
+                    let range = try XCTUnwrap(controller.model.visibleAlongRange)
+                    let length: CGFloat = edge.isVertical ? 260 : NotchLayout.cardWidth
+                    for index in 0..<2 {
+                        let centre = controller.model.tooltipAlong(index: index, length: length)
+                        XCTAssertGreaterThanOrEqual(centre - length / 2, range.lowerBound)
+                        XCTAssertLessThanOrEqual(centre + length / 2, range.upperBound)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Every edge obeys the one size setting, including the top.
+@MainActor
+final class EverySizeSettingAppliesEverywhereTests: XCTestCase {
+    /// **The setting survives the edge it cannot be seen on.**
+    ///
+    /// There was an override here that lost it: the top edge drew at a fixed
+    /// size *and overwrote the setting with it*, so moving back to a side edge
+    /// kept the size the hardware had imposed, and the rings, the arc and the
+    /// tooltip all changed at once. Two sizes is what "not consistent" was.
+    ///
+    /// Merged into the display's own cutout the top edge is the size of that
+    /// cutout — one shape cannot be two thicknesses — but that is now a scale it
+    /// is *drawn* at, not a value written back over the user's. Whatever is
+    /// chosen while the notch is on the hardware edge is exactly what it is when
+    /// it arrives on any other.
+    func testTheSizeSettingSurvivesTheHardwareEdge() throws {
+        guard NSScreen.screens.contains(where: { $0.hardwareNotch != nil }) else {
+            throw XCTSkip("Needs a display with a notch")
+        }
+        let controller = NotchWindowController()
+        controller.model.updateSnapshots(Fixtures.snapshots())
+        defer { controller.stop() }
+
+        controller.apply(edge: .top)
+        controller.relocate()
+        controller.apply(scale: 0.75)
+        XCTAssertEqual(controller.model.requestedScale, 0.75, accuracy: 0.001,
+                       "the top edge overwrote the setting again")
+        XCTAssertNotNil(controller.model.mergedScale,
+                        "on the hardware edge the cutout is what sets the size")
+
+        controller.model.edge = .right
+        controller.relocate()
+        XCTAssertNil(controller.model.mergedScale, "a side edge has no cutout to follow")
+        XCTAssertEqual(controller.model.sizeScale, 0.75, accuracy: 0.001,
+                       "the size the user chose did not survive the move")
+    }
+}
+
+/// The arc that hugged a corner is gone with the layout that had one. Beside
+/// the display's cutout the notch used to be a flat bar whose far corner was
+/// convex, so the settings orb hung off it and its resting arc traced it. The
+/// notch is the same shape on every edge now and the orb nestles in the far
+/// flare's pocket, which `SettingsOrbTests` covers.
+
+/// **The panel is relaid out when the notch reopens after an edge change.**
+///
+/// Reported as the settings arc sitting far from the bar and the tooltip
+/// pointing wide of its ring — but only after moving the notch between edges,
+/// never on a fresh launch.
+///
+/// `apply(edge:)` folds the notch, relocates, then a beat later opens it again.
+/// Without a second relocate the window keeps the size the *folded* notch
+/// needed. The shape centres itself on the panel it is in, while the orb and
+/// the tooltip are placed from `slack` — so a panel that is too narrow slides
+/// the shape left and leaves everything hung off it behind.
+@MainActor
+final class PanelFollowsTheNotchAfterAnEdgeChangeTests: XCTestCase {
+    private func settle(_ seconds: TimeInterval) {
+        let until = Date().addingTimeInterval(seconds)
+        while Date() < until {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+    }
+
+    func testThePanelMatchesTheModelAfterMovingRoundTheEdges() throws {
+        guard NSScreen.screens.contains(where: { $0.hardwareNotch != nil }) else {
+            throw XCTSkip("Needs a display with a notch")
+        }
+        let controller = NotchWindowController()
+        controller.model.updateSnapshots(Array(Fixtures.snapshots().prefix(3)))
+        controller.apply(edge: .top)
+        controller.model.isExpanded = true
+        controller.relocate()
+        defer { controller.stop() }
+
+        let fresh = try XCTUnwrap(controller.panelContentViewForTesting?.window?.frame.width)
+        XCTAssertEqual(fresh, controller.model.panelSize.width, accuracy: 1,
+                       "a freshly placed notch already disagrees with its panel")
+
+        // The animated path, the way the edge picker drives it.
+        for edge in [NotchEdge.right, .bottom, .left, .top] {
+            controller.apply(edge: edge)
+            settle(0.6)
+        }
+
+        let after = try XCTUnwrap(controller.panelContentViewForTesting?.window?.frame.width)
+        XCTAssertEqual(after, controller.model.panelSize.width, accuracy: 1,
+                       "after the round trip the panel is \(after)pt where the notch "
+                       + "needs \(controller.model.panelSize.width)pt — the shape will "
+                       + "sit \((controller.model.panelSize.width - after) / 2)pt off "
+                       + "everything placed from slack")
+        XCTAssertEqual(after, fresh, accuracy: 1,
+                       "the notch is a different size after moving than it was at launch")
+    }
+}
+
+/// Settings that change the notch's size have to relay the window out with it.
+@MainActor
+final class ReadingToggleRelaysThePanelOutTests: XCTestCase {
+    /// Beside the hardware the reading is paid for out of ring size, so
+    /// turning it on changes the strip's length and the window around it. Set
+    /// without relocating, the window kept its old width and the shape — which
+    /// centres itself in it — slid away from the settings arc and the tooltip.
+    func testTogglingTheReadingKeepsThePanelWithTheNotch() throws {
+        guard NSScreen.screens.contains(where: { $0.hardwareNotch != nil }) else {
+            throw XCTSkip("Needs a display with a notch")
+        }
+        let controller = NotchWindowController()
+        controller.model.updateSnapshots(Array(Fixtures.snapshots().prefix(3)))
+        controller.apply(edge: .top)
+        controller.model.isExpanded = true
+        controller.apply(showsNotchReadings: false)
+        defer { controller.stop() }
+
+        for on in [true, false, true] {
+            controller.apply(showsNotchReadings: on)
+            let panel = try XCTUnwrap(controller.panelContentViewForTesting?.window?.frame.width)
+            XCTAssertEqual(panel, controller.model.panelSize.width, accuracy: 1,
+                           "with readings \(on ? "on" : "off") the panel is \(panel)pt "
+                           + "where the notch needs \(controller.model.panelSize.width)pt")
+        }
     }
 }

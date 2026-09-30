@@ -65,6 +65,9 @@ Design spec in [`docs/specs/2026-08-28-usage-notch-design.md`](docs/specs/2026-0
       reports neither
 - [x] **`WebSessionProvider`** — the browser plumbing written once; `Sites`
       carries the per-site origin, script and parser
+- [x] **DeepSeek Platform** — explicit WebView login, account funded/spent
+      summary, aggregate tokens/cost/requests/API-key metrics, and 30-day
+      daily token/cost charts from the Platform usage endpoints
 - [x] **Cursor** via the same route, pinned by `CursorUsageTests`
 - [x] Cursor's glyph, flattened from its own SVG rather than traced from the
       design frame — exact at any size. See "Flattening an SVG" below
@@ -164,8 +167,9 @@ means work is happening. `CodexActivityMonitor` errs short: the ring stops eight
 seconds after the last write rather than claiming activity it cannot see. If
 Codex grows a real status field, that should replace this.
 
-Perplexity's adapter is kept but unregistered. `WebSessionProvider` is the
-working pattern for a site behind bot management, and re-registering is one line.
+Perplexity's adapter is kept but unregistered. DeepSeek is the first registered
+Platform-login site using `WebSessionProvider`; its login remains explicit and
+its account data stays in the provider's own WebView session.
 
 ### Cursor
 
@@ -179,8 +183,8 @@ Cursor account — so the notch honestly reported zero usage belonging to somebo
 who was not the user. The two identities were only visible side by side:
 
 ```
-editor state.vscdb : google-oauth2|user_01JT4P1FS4AB8WA4N7QVSYZRTT  (raphaelvinz.rv@…, "Vinz")
-WebView /api/auth/me:              user_01JXH6KPZ5D7XZHMEQ181QRG2S  (xurfa9@…,        "Xurfa")
+editor state.vscdb : google-oauth2|<editor-account-id>  (account A)
+WebView /api/auth/me:              <webview-account-id> (account B)
 ```
 
 `CursorCredentials` now reads `cursorAuth/accessToken` and
@@ -330,6 +334,21 @@ is signed with a stable Developer ID identity (`project.yml`) — an unsigned or
 ad-hoc build gets a new identity every rebuild and the prompt would come back
 after every `make run`. Click **Always Allow** once and it sticks. A refusal
 backs the provider off for five minutes so a denied prompt cannot spam.
+
+### Own items prompt too after an ad-hoc rebuild
+
+Items this app stores itself (`lmstudio-api-token`, `ollama-api-key`) are
+ACL-bound to the signing identity just like a borrowed one — an ad-hoc Debug
+build is a new identity every time, so the app goes back to being a stranger
+to its own item. `LMStudioCredentials`/`OllamaCredentials` were reading it
+uncached from the 1 s local-runtime timer, the 2 s `LMStudioLink` reconnect
+loop, and twice per render of `LMStudioSettingsRow.isPresent` — one prompt
+turned into one every few seconds. Both now sit behind `CredentialCache` +
+`KeychainItem.modifiedAt`, `isPresent` is an attribute probe rather than a
+data read, and `store`/`delete`/`forgetCachedCredential()` call
+`forgetCached()`. A free `Apple Development` certificate makes the `Makefile`
+sign Debug builds with a stable identity, so "Always Allow" survives rebuilds
+the same way it does for Claude/Cursor/Antigravity.
 
 ## M4b — Is it working? (agent activity)
 
@@ -564,8 +583,8 @@ would be theatre. What there *is* to show is whose readings these are:
 
 ```
 Claude  Pro · via Claude Code
-Cursor  raphaelvinz.rv@gmail.com · Free · via Cursor
-Codex   raphaelvinz.rv@gmail.com · Free · via Codex
+Cursor  [account email] · Free · via Cursor
+Codex   [account email] · Free · via Codex
 ```
 
 That is not decoration. Borrowing a credential means the account being read can
@@ -790,7 +809,7 @@ hundredths of a point wide; that is a fact about arcs, not a bug.
 - [ ] Threshold notifications (80% / 100%), per-provider mute
 - [ ] Auto-hide: never / on fullscreen / on overlap
 - [ ] Multi-display follow + unplug handling
-- [ ] Reduced-motion / reduced-transparency
+- [ ] Reduced-motion / reduced-transparency — reduced transparency is now the system's on the glass surface; see "The glass surface"
 - [ ] App icon, final name, README screenshots
 
 ## Managing accounts from Settings
@@ -828,8 +847,7 @@ credential, which is the same control under an honest name.
 - [x] `WebSessionProvider.signOut()` clears its own cookies — the one true
       logout in the app, because that session is the only one Codenotch created.
       Scoped to the site's host: the data store is shared, so emptying it would
-      sign the user out of every other web provider too. Nothing ships on this
-      path today, but the button would silently lie without it.
+      sign the user out of every other web provider too.
 - [x] Each row shows the account it reads (address and plan), with **Open** going
       to that vendor's own usage page.
 - [x] Every row states what signing out does *not* reach
@@ -1125,12 +1143,25 @@ it and then notice when the answer changes.
 - [x] Counts are compacted for the ring (`651k`, `1.1M`). A 44 pt ring cannot
       hold seven digits, and below 10 000 the digits are printed verbatim so no
       existing request or credit count changes.
-- [x] Busy detection watches **Gemini CLI only**, by modification date. The
-      session file holds no pid, so `ProcessLiveness` has nothing to verify, but
-      the CLI patches `lastUpdated` on every message — the same mtime substitute
-      Antigravity and Cursor use. OpenCode's and Hermes's databases are written
-      for reasons that have nothing to do with a Gemini call, so their mtimes
-      would report work that is not this provider's.
+- [x] Busy detection watches **Gemini CLI**, by modification date: the session
+      file holds no pid, so `ProcessLiveness` has nothing to verify, but the CLI
+      patches `lastUpdated` on every message — the same mtime substitute
+      Antigravity and Cursor use. The ring now merges three readers under
+      `gemini-api`, in tooltip order (Gemini CLI, OpenCode, Hermes), because
+      OpenCode's and Hermes's databases do carry a per-call marker that is
+      unambiguously a Gemini call, even though their mtimes alone would report
+      work that is not this provider's. OpenCode's marker is the newest
+      assistant message in a recently updated session with `providerID =
+      google` and no `time.completed`; sub-agent sessions fold into their
+      parent via `parent_id`, and the query is restricted to
+      `session.time_updated` within 45 s because `message` has no time index.
+      Hermes's marker is an open (`ended_at IS NULL`) session with
+      `billing_provider = gemini` whose `last_activity_at` is within 45 s, or an
+      unexpired row in `session_turn_leases`. None of the three tools persists
+      a "waiting for the user" state on disk — OpenCode exposes one only on its
+      password-protected local server's SSE stream — so the provider reports
+      busy or nothing, like Cursor and Antigravity, not Claude's busy/waiting/
+      idle.
 - [x] **Two departures from the provider template**, both deliberate. The
       protocol extension's default `signInRoute` offers to sign in, and here
       there is nothing to sign into, so this provider overrides it with a
@@ -1256,6 +1287,13 @@ it and then notice when the answer changes.
       Dock at the bottom is nowhere near a right-edge notch, and centring on the
       visible area would slide that notch up and down every time the Dock hid
       itself, for no reason anyone could see.
+- [x] **Superseded by `2913f68`: every edge now anchors to `frame`.** Pinning to
+      `visibleFrame` meant the notch jumped whenever the Dock or menu bar
+      appeared, which moved a position the user had chosen.
+      `NotchGeometry.panelFrame` reads `frameValue` on all four edges;
+      `visibleFrameValue` is still declared on `ScreenDescribing` but no
+      production code reads it any more. The hardware-notch merge on the top
+      edge is decided in `NotchViewModel.adopt(screen:)`.
 - [x] `SideNotchShape` is still written once, for the right edge, and
       transformed onto the others. Four hand-written variants would mean four
       copies of the corner-versus-flare clamping, and three of them would never
@@ -1540,6 +1578,265 @@ Not an icon problem at all: the app had no Dock tile for an icon to sit on.
       window they had just opened.
 - [x] Clicking the Dock icon opens settings, via the `applicationShouldHandle
       Reopen` hook added for the Hide option. The notch stays where it is.
+
+## The glass surface
+
+### One glass, nothing underneath
+
+The expanded notch body, the tooltip and the settings orb are all painted, in
+the glass style, with `.glassEffect(.regular)` and nothing else — no tint, no
+colour underneath. That is deliberate: a wash of our own would sit under the
+glass and override the Clear/Tinted choice, light/dark mode and Reduce
+Transparency that the Mac's Appearance settings already control, so leaving
+the layer empty is what lets those settings reach the notch untouched. The
+tooltip is one shape, `TooltipSilhouette`, covering the card and the tail
+together rather than two separate glass shapes — two shapes each get their
+own rim highlight and show a seam where the tail meets the card.
+`testTheSilhouetteIsOneShapeCoveringCardAndTail`
+in `Tests/TooltipRenderTests.swift` pins it.
+
+### Solid stays the frame's
+
+`NotchSurfaceStyle.solid` — the non-default choice — forces `darkAqua` on the
+panel, so every hex the frame specifies still applies exactly as it did before
+glass existed. `Palette` gained light-appearance variants purely so the default
+glass style can follow the Mac into light mode: `textPrimary` `#000000`,
+`textSecondary` `#6B6B6B`, `ample` `#00A356` and `watch` `#B08800`, plus
+`ringTrack` at alpha 0.16 and `barTrack` at alpha 0.15 on black, all chosen for
+at least 3:1 contrast against white rather than sampled from anything.
+`PaletteAppearanceTests` (`Tests/UsageBandTests.swift`) pins both appearances,
+and `testTheSolidStyleForcesTheDarkAppearance` (`PanelSizingIntegrityTests`,
+`Tests/NotchRenderTests.swift`) pins the forced panel appearance.
+
+### What the tests can see
+
+`ImageRenderer` has no desktop behind it to refract, so almost every pixel test
+that renders the notch renders it in the solid style — glass with nothing
+behind it to sample is not what glass looks like on screen. The one glass
+exception is the hardware's band, below, which is painted the same opaque
+black regardless of style and so needs no desktop to read correctly. The other
+thing the glass style still has to prove headlessly is that the folded pill
+paints nothing of its own in the glass style — commit ac1469d made glass
+reach the folded notch — which `testTheFoldedPillIsTransparentInTheGlassStyle`
+pins.
+
+### The hardware's band stays black
+
+A MacBook check showed the physical cutout, in the glass style, as a black
+rectangle set into a sheet of glass — the band at the hardware's height read
+as glass over nothing rather than as the hole in the screen it actually is.
+The fix keeps that band opaque black in both surface styles: it is a topmost
+layer in `NotchRootView.notch(_:)`, sized to `model.contentInset`, so the
+cutout and the drawn shape read as one wide notch again, and the glass begins
+only below it, where the readings begin. `testTheHardwaresBandStaysBlackInTheGlassStyle`
+pins it next to the solid-style band test.
+
+Upstream 1.7.0 draws the whole notch two points past the bezel
+(`NotchRootView.bezelBleed`, applied after `.scaleEffect`), so a band exactly
+`contentInset` deep ended two points short of the cutout's bottom and left a
+strip of glass inside the hole. The band is now `contentInset + bezelBleed /
+sizeScale` deep, which after scaling and the unscaled offset covers exactly
+`contentInset × sizeScale` on screen — the same region the readings are kept
+out of. It only showed in the full run, and the reason turned out not to be
+layer order: bisected with `-only-testing` pairs, `ImageRenderer` paints
+`glassEffect` as nothing in a cold process; once any test has shown a live
+`NotchPanel` — in any surface style, painting glass or not — the same
+renderer paints `glassEffect` as an opaque flat grey (136/255, alpha 1) over
+its ZStack siblings for the rest of the process, so the band probe read grey
+although the layer order was right all along. Earlier offscreen renders do not
+trigger it, and `stop()` does not undo it. The fix is the
+`\.codenotchHeadlessGlass` environment flag: it lets the two glass pixel tests
+render the glass path with the system material left out, so they check only
+what is ours — the transparent body fill, the `darkGlass` dim and the opaque
+band — since the material itself is the system's and is not testable headless.
+
+Within one test process, the first `ImageRenderer` render of a given pixel
+size in a test method can hand back the *previous* test method's image at
+that size: the folded-pill test first read `testReduceTransparencyPaintsTheGlassStyleSolid`'s
+opaque black at four cells, the panel size both tests shared. Warm-up
+renders, fresh models and `.id(UUID())` did not clear it; a panel size no
+other pixel test renders (`cells: 3`) did. The next pixel test should give
+itself a size of its own, or expect the first render of a size it shares
+with another test to be stale.
+
+### Below macOS 26, and with Reduce transparency on
+
+Codenotch 1.7.0 targets macOS 15, where `glassEffect` does not exist yet. A
+material in the notch panel would have nothing behind it to blur, so below
+macOS 26 the glass style resolves to solid and the Surface setting is not
+offered at all — there is nothing to choose between. Reduce transparency
+resolves to solid too, following the same precedence the Settings window
+already uses for its own translucent chrome: Reduce transparency wins over
+glass. `testReduceTransparencyForcesTheDarkAppearance` and
+`testReduceTransparencyPaintsTheGlassStyleSolid` pin both cases. The window
+learns about a live accessibility change from
+`NSWorkspace.accessibilityDisplayOptionsDidChangeNotification` and re-applies
+the panel's appearance from that subscription, rather than only checking once
+at launch.
+
+### Dark glass
+
+`NotchSurfaceStyle.darkGlass` pins `darkAqua` on the panel for the same reason
+`solid` does: so `Palette`'s frame hexes apply exactly as specified rather
+than following the Mac into light mode. It is also the one deliberate
+exception to "nothing underneath" above — the user asked for black glass
+regardless of the Mac's own Appearance setting, so every glass site the notch
+draws (the body, the tooltip, the usage-reset card, the settings orb and the
+move handle) uses `Glass.clear` with `Palette.darkGlassDim` (black at 0.60)
+drawn in a `.background` beneath it when the style is `.darkGlass`. `glass`
+keeps using plain `Glass.regular` with nothing beneath it at every one of
+those sites, so it stays byte-for-byte the system's own glass. 0.60 replaced
+an initial 0.45, which read too light through `Glass.clear` on a real Mac
+(macOS 27) against a light desktop.
+
+The first attempt tried a black `Glass.tint(_:)` on `.regular` instead, and it
+rendered lighter and whiter than plain regular glass rather than darker.
+`Glass.regular` is adaptive — it adjusts its content to the luminosity of
+whatever is behind it — and `tint` only colourises the material toward a hue;
+a zero-chroma black tint has no hue to push toward and cannot lower
+luminance. The SDK's own `Glass.clear` doc comment gives the actual recipe for
+a dark glass: `.glassEffect(.clear)` over "a transparent black color beneath
+your glass", which is what `darkGlass` now does. The hardware's band is
+unaffected either way: it is painted opaque black regardless of surface
+style, as above.
+
+The dim is the one part of the style a headless render can see, so
+`testTheFoldedPillCarriesTheDimInTheDarkGlassStyle` probes it — at `cells: 5`,
+a panel size of its own, because the hand-me-down above would otherwise hand
+this test's dim to the folded-pill test that sorts right before it.
+
+## The local model's ring
+
+### A small context is an arc, not a dot
+
+A local-runtime cell (LM Studio, Ollama) draws its outer arc as the last
+request's prompt tokens over the loaded instance's context length, in the
+colour of the last response's speed band. When the last prompt filled only a
+few percent of the context, the trimmed arc was shorter than its own round
+caps and rendered as a single dot, which read as a status light ("green =
+fine") rather than a context reading.
+
+The fix is `NotchLayout.localArcMinimumSweep` (0.06 of the circle, ≈20px of
+body at the ring's radius plus the caps, so it is unmistakably an arc, and
+below 0.1 so the floor cannot be mistaken for a real reading);
+`ProviderRing.localSweep(for:)` applies it only when a reading exists, `nil`
+still draws the full ring as Ollama always did. The floor is a drawing
+decision only — `ringFraction`, the tooltip's "Context used" and the
+VoiceOver text keep the true number. Pinned by
+`testASmallContextStillReadsAsAnArc` and `testTheMinimumArcIsLongerThanItsCaps`
+in `NotchLayoutTests`.
+
+## How current the numbers are
+
+### A fetch every thirty seconds served from a half-hour-old file
+
+The schedule was not what made a percentage look frozen. `UsageStore` already
+polled every 60s while a session was busy — but `ClaudeOAuthProvider` answers
+from Claude Desktop's HTTP cache first, and would serve an entry up to **30
+minutes** old, or a `claude "/usage"` answer up to **5 minutes** old. So the
+ring could be re-read twice a minute and still show a number from half an hour
+ago. Both allowances are right for a ring nobody is watching: the cache is free
+and unrefusable, and it cannot be wrong about a number that is not changing.
+
+`UsageFreshness` is the caller's half of that sentence. `.standard` is the
+schedule's default and takes whatever a provider has; `.live` says a cached
+reading will not do, and the Claude provider then accepts the Desktop entry only
+inside 2 minutes and reuses a CLI answer only inside 90 seconds — dropping
+through to the endpoint, whose own back-off is untouched, when neither can
+answer for right now. It is a protocol requirement with an extension default
+rather than an extension member alone: the store holds providers as `any
+UsageProvider`, so a statically dispatched call would have reached every
+default and no override. Every other provider fetches on every call and gets
+the default for free.
+
+`.live` is asked for exactly where the number is moving or being read: while
+`isBusy()` is true, on **Refresh now**, on a single ring's refresh, on a phone
+asking for a snapshot, and on a look.
+
+### What the schedule spends, and where
+
+The tick is now 15s and carries a `busyRefreshInterval` of 30s, where it used to
+be a 60s tick that fetched on every one of them while busy. Two things needed
+the finer tick: a busy interval under a minute is not expressible without it,
+and `hasWindowRolledOver` — the reset boundary, which owes an alert — is noticed
+within a tick. `shouldRefresh` gained the interval with a default of 0, which is
+the old "every tick while busy" and keeps the existing assertions honest about
+what they are asserting.
+
+Two events ask outside the schedule, and neither is a timer:
+
+- **A session stopping.** The falling edge of `isBusy` is where the schedule
+  drops to the 5-minute idle interval and leaves the final figure — the one you
+  came to look at — alone. `refreshBecauseWorkFinished` takes one reading there,
+  spaced per provider by the busy interval, because a session's state is read
+  from a transcript and legitimately flickers between busy and waiting through
+  one long run. `AppDelegate` holds `busyProviderIDs` to tell the edge from the
+  middle: `ActivityCoordinator` reports the state after a change and cannot say
+  what it was before.
+- **A look.** Opening the status item's menu, unfolding the notch, or the
+  pointer landing on a ring. `refreshBecauseSomeoneIsLooking` asks live and
+  spaces itself by 15s, so four rings hovered in four seconds is one fetch. The
+  hover hook matters on its own: a notch held permanently open never unfolds,
+  so there would otherwise be no look to notice.
+
+### Ask the provider every time you look
+
+Even bounded at two minutes, a percentage is still a figure that was *read*
+rather than a live wire — and somebody comparing Codenotch against a vendor's
+own dashboard figure by figure wants the wire. `UsageFreshness.fromSource` is
+that: zero allowance on both of Claude's held sources, so whatever is held is
+skipped however new it is. A cache written two seconds ago *is* the account's
+number, so this knowingly spends a request to be told what it already knew.
+
+It is a setting (`Preferences.asksProviderOnLook`, **General › Readings**) and
+off by default, because it is not strictly better. A provider that rate-limits
+answers one request too many with a back-off that then holds a number *older*
+than the cache would have been. So it is what somebody asks for and never what
+the schedule decides: the closure reaches `refreshBecauseSomeoneIsLooking` and
+nothing else, and the spacing is unchanged at 15s — the setting changes what an
+answer may be served from, never how often one is asked for. **Refresh now**, a
+ring clicked, the settings row's refresh and a phone's refresh ask for it
+unconditionally: each of those is a human's own click, rate-limited by the human.
+
+Two things had to be right for it not to make freshness *worse*:
+
+- **It may not leave a ring emptier than `.standard` would have.** On a Mac with
+  Claude Desktop and no usable token — no Claude Code, an expired keychain item,
+  a 429 — the cache is the only source there is. Skipping it and then failing
+  would have turned a filled ring into a dimmed one on every hover. The keychain
+  path is now wrapped: where nothing live can answer and something *was* skipped
+  (`desktopAllowance < desktopFreshness`), the held reading is returned rather
+  than the error thrown. A cache past the ordinary thirty minutes is not
+  resurrected by it — it was not showable before the request and is not after.
+- **Skipping a cache is not missing one.** `noteDesktopMiss` arms a five-minute
+  rescan throttle, and it was armed by any reading the caller did not accept. So
+  one look with the setting on would have stopped the Desktop cache being read at
+  all for the next five minutes, taking the source away from every poll after it.
+  `showable` — would this reading be shown at *any* freshness — is now kept apart
+  from "may it be shown now", and only the first arms the throttle.
+
+### The countdown is read against a clock
+
+None of the above touches the time remaining, which needs no fetch at all — it
+is arithmetic on a `resetsAt` the last reading already carried. Two things were
+nevertheless stale:
+
+- The notch's clock ticked every 30s, so a card open on "Resets in 12 min" was
+  up to half a minute behind the clock it is read against. It ticks every second
+  now, and `tickClock` only *publishes* a second when something on screen counts
+  in them (`isExpanded || hoveredIndex != nil`) — `model.now` is `@Published`
+  and every card is drawn against it, so publishing is a SwiftUI update of the
+  whole notch. A folded notch keeps the old 30s pace.
+- `ResetCopy` counted the last minute as "<1m" in the bar and "Resets in 1 min"
+  in the card, both of which could mean four seconds. The last minute now counts
+  in seconds — "42s", "Resets in 42 sec" — and `nextCountdownChange` steps by a
+  second inside it and by a minute above it, so the menu bar's own one-shot
+  timer redraws a five-hour window once a minute for 4h59m and once a second for
+  the last sixty. The bar's `countdownRoom` already reserves the width of
+  "4h 59m", so seconds add none: `testSecondsFitTheRoomTheCountdownAlreadyReserves`
+  holds it to that. The wake-up's tolerance also had to stop being a flat
+  second — at a one-second step it let the timer wake having already skipped the
+  figure it woke up to show.
 
 ## Decisions needed
 - [ ] Final app name (`Codenotch` is a placeholder)

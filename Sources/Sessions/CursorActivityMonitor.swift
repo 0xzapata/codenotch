@@ -11,6 +11,12 @@ import SQLite3
 /// - `unfinishedRunAt` — set while a run is in flight, cleared when it finishes.
 /// - `hasBlockingPendingActions` / `hasPendingPlan` — set when it wants you.
 ///
+/// Nested `isSubagent` composers are skipped: the parent chat already carries
+/// the busy/waiting state, and finished subagents are what left the blocking
+/// flag set for months. Waiting rows are gated on this editor launch (or a
+/// write still inside the staleness window), so a leftover approval from a
+/// previous process does not keep the notch amber.
+///
 /// The database is in **WAL mode**, so it must be opened without `immutable`:
 /// that flag tells SQLite to ignore the write-ahead log, which means reading
 /// whatever was true at the last checkpoint. It is the difference between a
@@ -102,13 +108,24 @@ final class CursorActivityMonitor: ObservableObject, AgentActivityMonitor {
         guard let db = SQLiteStore.open(store) else { return [] }
         defer { sqlite3_close(db) }
 
-        let values = SQLiteStore.rows(
+        // `isSubagent` lives on the row, not always in the JSON value. Nested
+        // composers (continual-learning, explore, …) are not their own notch
+        // rows: the parent chat already carries the busy/waiting state, and
+        // finished subagents are what left `hasBlockingPendingActions` set for
+        // months after the run ended.
+        let rows = SQLiteStore.rows(
             in: db,
-            sql: "SELECT value FROM composerHeaders WHERE isArchived = 0 ORDER BY recency DESC LIMIT 40"
+            sql: """
+            SELECT value, isSubagent FROM composerHeaders
+            WHERE isArchived = 0 ORDER BY recency DESC LIMIT 40
+            """,
+            columns: 2
         )
-        return values
-            .compactMap {
-                session(fromHeader: $0, cursorLaunchedAt: cursorLaunchedAt,
+        return rows
+            .compactMap { row in
+                session(fromHeader: row[0],
+                        isSubagent: flag(row.count > 1 ? row[1] : nil),
+                        cursorLaunchedAt: cursorLaunchedAt,
                         staleAfter: staleAfter, now: now)
             }
             .sorted { $0.since > $1.since }
@@ -137,7 +154,15 @@ final class CursorActivityMonitor: ObservableObject, AgentActivityMonitor {
     ///   at all and `cursorLaunchedAt` is nil.
     /// - Written longer than `staleAfter` ago, the conversation has stopped
     ///   being written to, which is the only evidence an abandoned run leaves.
+    ///
+    /// Waiting is different from busy on one point: checkpoints do not move
+    /// until you answer, so a plan from this morning must keep its amber.
+    /// The launch gate still applies — a blocking flag from a previous
+    /// process is not a question — and a wait that has gone silent longer
+    /// than `staleAfter` with the editor shut or restarted is retired the
+    /// same way a dead run is.
     static func session(fromHeader json: String,
+                        isSubagent: Bool = false,
                         cursorLaunchedAt: Date?,
                         staleAfter: TimeInterval,
                         now: Date = Date()) -> AgentSession? {
@@ -146,12 +171,16 @@ final class CursorActivityMonitor: ObservableObject, AgentActivityMonitor {
               let id = head["composerId"] as? String
         else { return nil }
 
+        if isSubagent || flag(head["isSubagent"]) { return nil }
+
         let blocked = (head["hasBlockingPendingActions"] as? Bool) == true
             || (head["hasPendingPlan"] as? Bool) == true
         let runStart = date(head["unfinishedRunAt"])
         // A quarter of rows carry `lastUpdatedAt` and no checkpoint at all.
         let lastWrite = date(head["conversationCheckpointLastUpdatedAt"])
             ?? date(head["lastUpdatedAt"])
+        let created = date(head["createdAt"])
+        let touched = lastWrite ?? runStart ?? created
 
         let isRunning: Bool = {
             guard let runStart, let cursorLaunchedAt else { return false }
@@ -159,22 +188,38 @@ final class CursorActivityMonitor: ObservableObject, AgentActivityMonitor {
             // since `unfinishedRunAt` *is* its creation time that is the most
             // recent thing to have happened to it. The same value on a chat
             // opened last week is correctly stale.
-            let touched = lastWrite ?? runStart
-            guard touched >= cursorLaunchedAt else { return false }
-            return now.timeIntervalSince(touched) <= staleAfter
+            let stamp = lastWrite ?? runStart
+            guard stamp >= cursorLaunchedAt else { return false }
+            return now.timeIntervalSince(stamp) <= staleAfter
+        }()
+
+        let isSuccess: Bool = {
+            guard let runStart, let cursorLaunchedAt else { return false }
+            let stamp = lastWrite ?? runStart
+            guard stamp >= cursorLaunchedAt else { return false }
+            let age = now.timeIntervalSince(stamp)
+            return age > staleAfter && age <= staleAfter + 9
         }()
 
         let isRecentlyFinished: Bool = {
             guard let runStart, let cursorLaunchedAt else { return false }
-            let touched = lastWrite ?? runStart
-            guard touched >= cursorLaunchedAt else { return false }
-            let age = now.timeIntervalSince(touched)
-            return age > staleAfter && age <= staleAfter + 15
+            let stamp = lastWrite ?? runStart
+            guard stamp >= cursorLaunchedAt else { return false }
+            let age = now.timeIntervalSince(stamp)
+            return age > staleAfter + 9 && age <= staleAfter + 15
         }()
 
+        let isWaiting = blocked && isCurrentWait(
+            touched: touched,
+            cursorLaunchedAt: cursorLaunchedAt,
+            staleAfter: staleAfter,
+            now: now
+        )
+
         let state: AgentSession.State
-        if blocked { state = .waiting }
+        if isWaiting { state = .waiting }
         else if isRunning { state = .busy }
+        else if isSuccess { state = .success }
         else if isRecentlyFinished { state = .idle }
         else { return nil }
 
@@ -189,12 +234,42 @@ final class CursorActivityMonitor: ObservableObject, AgentActivityMonitor {
 
         return AgentSession(
             id: "cursor.\(id)",
-            name: (head["name"] as? String) ?? "Untitled chat",
+            name: (head["name"] as? String) ?? L10n.t("Untitled chat"),
             detail: (head["subtitle"] as? String) ?? "Cursor",
             state: state,
-            waitingFor: blocked ? "needs your input" : nil,
+            waitingFor: isWaiting ? L10n.t("needs your input") : nil,
             since: since
         )
+    }
+
+    /// Waiting is live if it belongs to this editor launch — you may sit on
+    /// a plan for hours — or if the last write is still inside the staleness
+    /// window, which covers a crash-and-restart. An undated row with the
+    /// editor up is trusted: we cannot prove it is old.
+    private static func isCurrentWait(touched: Date?,
+                                      cursorLaunchedAt: Date?,
+                                      staleAfter: TimeInterval,
+                                      now: Date) -> Bool {
+        let recentlyTouched = touched.map { now.timeIntervalSince($0) <= staleAfter } ?? false
+        guard let cursorLaunchedAt else { return recentlyTouched }
+        guard let touched else { return true }
+        return touched >= cursorLaunchedAt || recentlyTouched
+    }
+
+    /// Cursor stores booleans as 0/1 in SQLite, and JSONSerialization often
+    /// hands them back as `NSNumber`. Empty and unknown values are false.
+    private static func flag(_ value: Any?) -> Bool {
+        switch value {
+        case let flag as Bool:
+            return flag
+        case let number as NSNumber:
+            return number.boolValue
+        case let text as String:
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return trimmed == "1" || trimmed == "true" || trimmed == "yes"
+        default:
+            return false
+        }
     }
 
     /// Cursor writes its timestamps as milliseconds since the epoch.

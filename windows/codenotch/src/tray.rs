@@ -1,19 +1,18 @@
-use crate::hooks_install;
 use crate::i18n::tr;
-use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use crate::traymenu;
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::{AppHandle, Manager, Wry};
 
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
-    let lang = {
-        let st = app.state::<crate::AppState>();
-        let c = st.cfg.lock().unwrap();
-        c.lang.clone()
-    };
-    let menu = build_menu(app, &lang)?;
-    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
-    TrayIconBuilder::with_id("main")
-        .icon(icon)
+    let menu = build_menu(app)?;
+    let mut builder = TrayIconBuilder::with_id("main");
+    // Windows does not tint tray icons and the monochrome outline vanishes on a dark taskbar, so
+    // the app's own mark is the icon. trayicon::app_mark explains why at length.
+    if let Some(icon) = crate::trayicon::app_mark() {
+        builder = builder.icon(icon);
+    }
+    builder
         .tooltip(concat!("Codenotch v", env!("CARGO_PKG_VERSION")))
         .menu(&menu)
         .show_menu_on_left_click(true)
@@ -22,109 +21,150 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-pub fn build_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<Wry>> {
-    let install = MenuItemBuilder::with_id("install", tr(lang, "install")).build(app)?;
-    let uninstall = MenuItemBuilder::with_id("uninstall", tr(lang, "uninstall")).build(app)?;
-    let l_auto = CheckMenuItemBuilder::with_id("lang-auto", tr(lang, "lang_auto"))
-        .checked(lang == "auto")
-        .build(app)?;
-    let l_zh = CheckMenuItemBuilder::with_id("lang-zh", "中文")
-        .checked(lang == "zh")
-        .build(app)?;
-    let l_en = CheckMenuItemBuilder::with_id("lang-en", "English")
-        .checked(lang == "en")
-        .build(app)?;
-    let l_ja = CheckMenuItemBuilder::with_id("lang-ja", "日本語")
-        .checked(lang == "ja")
-        .build(app)?;
-    let l_ko = CheckMenuItemBuilder::with_id("lang-ko", "한국어")
-        .checked(lang == "ko")
-        .build(app)?;
-    let lang_menu = SubmenuBuilder::new(app, tr(lang, "language"))
-        .items(&[&l_auto, &l_zh, &l_en, &l_ja, &l_ko])
-        .build()?;
-    let refresh = MenuItemBuilder::with_id("refresh", tr(lang, "refresh")).build(app)?;
-    let reset = MenuItemBuilder::with_id("reset", tr(lang, "reset_pos")).build(app)?;
-    let open_data = MenuItemBuilder::with_id("open-data", tr(lang, "open_data")).build(app)?;
-    let auto = CheckMenuItemBuilder::with_id("autostart", tr(lang, "autostart"))
-        .checked(crate::autostart::is_enabled())
-        .build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", tr(lang, "quit")).build(app)?;
-    MenuBuilder::new(app)
-        .items(&[&install, &uninstall])
-        .separator()
-        .item(&lang_menu)
+/// The readings themselves, as the Mac's menu bar shows them: a line per provider with its headline
+/// figure, and under it one greyed line per limit window. The macOS menu is rebuilt as it opens;
+/// Tauri has no such hook, so `refresh_menu` is called whenever a reading changes and once a minute
+/// besides, which keeps "Resets in 12 min" honest.
+/// Every line the menu would show, in order, with the id each carries. Kept apart from building the
+/// menu so a refresh can tell whether anything visible changed before it swaps the menu out.
+fn menu_lines(app: &AppHandle, lang: &str) -> Vec<(String, String, bool)> {
+    let now = crate::now_ms();
+    let mut lines = Vec::new();
+    for id in crate::TRAY_PROVIDER_IDS {
+        let snap = crate::snapshot_of(app, id);
+        if snap.status == "absent" {
+            continue;
+        }
+        let head = traymenu::header(
+            crate::provider_label(id),
+            crate::ring_fraction(app, id),
+            traymenu::stale_since(&snap, now),
+            now,
+            lang,
+        );
+        // Clicking a provider re-reads that one, as on the Mac.
+        lines.push((format!("refresh:{id}"), head, true));
+        for (n, line) in traymenu::provider_lines(&snap, now, lang).iter().enumerate() {
+            // Windows does not indent submenu-less items, so the indent is in the text.
+            lines.push((format!("line:{id}:{n}"), format!("    {line}"), false));
+        }
+    }
+    lines
+}
+
+pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    let lang = language(app);
+    build_menu_from(app, &lang, &menu_lines(app, &lang))
+}
+
+fn build_menu_from(app: &AppHandle, lang: &str, lines: &[(String, String, bool)]) -> tauri::Result<Menu<Wry>> {
+    let lang = lang.to_string();
+    let mut items: Vec<tauri::menu::MenuItem<Wry>> = Vec::new();
+    for (id, text, enabled) in lines {
+        items.push(MenuItemBuilder::with_id(id.clone(), text.clone()).enabled(*enabled).build(app)?);
+    }
+    if items.is_empty() {
+        items.push(
+            MenuItemBuilder::with_id("waiting", tr(&lang, "waiting"))
+                .enabled(false)
+                .build(app)?,
+        );
+    }
+    let refresh = MenuItemBuilder::with_id("refresh", tr(&lang, "refresh_all")).build(app)?;
+    let settings = MenuItemBuilder::with_id("settings", tr(&lang, "settings")).build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", tr(&lang, "quit_app")).build(app)?;
+    let mut menu = MenuBuilder::new(app);
+    for item in &items {
+        menu = menu.item(item);
+    }
+    menu.separator()
         .item(&refresh)
-        .item(&reset)
-        .item(&open_data)
-        .item(&auto)
+        .item(&settings)
         .separator()
         .item(&quit)
         .build()
 }
 
-fn refresh_menu(app: &AppHandle) {
-    let lang = {
-        let st = app.state::<crate::AppState>();
-        let c = st.cfg.lock().unwrap();
-        c.lang.clone()
-    };
-    if let Some(tray) = app.tray_by_id("main") {
-        if let Ok(menu) = build_menu(app, &lang) {
-            let _ = tray.set_menu(Some(menu));
-        }
+/// The language the menu speaks, already resolved: `traymenu` picks its wording by code and has no
+/// "auto" of its own.
+pub(crate) fn language(app: &AppHandle) -> String {
+    let st = app.state::<crate::AppState>();
+    let raw = st.cfg.lock().unwrap().lang.clone();
+    if raw == "auto" {
+        crate::i18n::resolve_auto().to_string()
+    } else {
+        raw
     }
 }
 
+/// The hover text: the same figures the menu opens with, for when the menu is not open.
+fn tooltip(app: &AppHandle) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for id in crate::TRAY_PROVIDER_IDS {
+        if crate::snapshot_of(app, id).status == "absent" {
+            continue;
+        }
+        let value = crate::ring_fraction(app, id)
+            .map(|f| format!("{}%", traymenu::pct(f)))
+            .unwrap_or_else(|| "—".into());
+        parts.push(format!("{} {value}", crate::provider_label(id)));
+    }
+    if parts.is_empty() {
+        concat!("Codenotch v", env!("CARGO_PKG_VERSION")).to_string()
+    } else {
+        format!("Codenotch — {}", parts.join(" · "))
+    }
+}
+
+/// Rebuilds the tray menu, ALWAYS on the main thread.
+///
+/// A menu is a Windows UI object. Building one or swapping it in from another thread leaves the
+/// tray holding a menu that never opens again — and since changing the language is what triggers a
+/// rebuild, the user is then locked out of the only place they could change it back. The tray's own
+/// click handlers already run on the main thread, but the readings poller and the settings window
+/// do not, so the hop is done here once rather than being remembered at every call site.
+/// What the menu last showed, so an unchanged refresh leaves it alone.
+static SHOWN: std::sync::Mutex<Option<(String, Vec<(String, String, bool)>)>> = std::sync::Mutex::new(None);
+
+/// Swaps the menu only when a line of it would read differently. `set_menu` replaces the menu the
+/// user may have open this moment — the refresh runs on the main thread, which the open popup's
+/// message loop still serves — so the minute tick used to close it under the pointer even when
+/// "Resets in 12 min" still said 12 min.
+pub fn refresh_menu(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(tray) = handle.tray_by_id("main") {
+            let lang = language(&handle);
+            let lines = menu_lines(&handle, &lang);
+            let key = (lang.clone(), lines.clone());
+            if SHOWN.lock().unwrap().as_ref() == Some(&key) {
+                // A tooltip can change without a line changing, and setting it closes nothing.
+                let _ = tray.set_tooltip(Some(&tooltip(&handle)));
+                return;
+            }
+            match build_menu_from(&handle, &lang, &lines) {
+                Ok(menu) => {
+                    let _ = tray.set_menu(Some(menu));
+                    let _ = tray.set_tooltip(Some(&tooltip(&handle)));
+                    *SHOWN.lock().unwrap() = Some(key);
+                }
+                Err(e) => crate::applog(&format!("tray menu: {e}")),
+            }
+        }
+    });
+}
+
+/// Provider rows carry `refresh:<id>`; everything else the menu offers is one of the four fixed
+/// items. Settings, language, hooks and the rest arrive as commands from the settings window.
 fn handle(app: &AppHandle, id: &str) {
+    if let Some(provider) = id.strip_prefix("refresh:") {
+        crate::refresh_provider(app, provider);
+        return;
+    }
     match id {
-        "install" => notice(app, hooks_install::install()),
-        "uninstall" => notice(app, hooks_install::uninstall()),
-        "reset" => crate::reset_bar(app),
-        "open-data" => {
-            let dir = crate::config::config_path().parent().map(|p| p.to_path_buf()).unwrap_or_default();
-            let _ = std::fs::create_dir_all(crate::glyphs::user_dir());
-            let mut cmd = std::process::Command::new("explorer");
-            cmd.arg(dir.as_os_str());
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                cmd.creation_flags(0x0800_0000);
-            }
-            let _ = cmd.spawn();
-        }
-        "refresh" => {
-            {
-                let st = app.state::<crate::AppState>();
-                let mut u = st.usage.lock().unwrap();
-                u.backoff_until = 0;
-            }
-            crate::usage::request_refresh();
-            crate::codex::request_refresh();
-            crate::cursor::request_refresh();
-            crate::antigravity::request_refresh();
-            let a = app.clone();
-            std::thread::spawn(move || crate::reload_glyphs(&a));
-        }
-        "autostart" => {
-            let r = if crate::autostart::is_enabled() {
-                crate::autostart::disable()
-            } else {
-                crate::autostart::enable()
-            };
-            notice(app, r);
-            refresh_menu(app); // refresh the check marks
-        }
+        "refresh" => crate::refresh_all(app),
+        "settings" => crate::settings_window::open(app),
         "quit" => app.exit(0),
-        _ if id.starts_with("lang-") => crate::apply_lang(app, &id[5..]),
         _ => {}
     }
-}
-
-fn notice(app: &AppHandle, r: Result<String, String>) {
-    let msg = match r {
-        Ok(m) => m,
-        Err(e) => format!("Error: {e}"),
-    };
-    let _ = app.emit("notice", &msg);
 }

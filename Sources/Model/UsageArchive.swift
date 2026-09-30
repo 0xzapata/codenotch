@@ -16,9 +16,17 @@ struct UsageArchive {
         let fetchedAt: Date
         /// Optional so archives written before this field still decode.
         let headlineID: String?
+        /// Optional for the same reason: an archive written before the weekly
+        /// ring existed has no second window to name, and must still open.
+        let weeklyID: String?
         /// Optional so archives written before Codex token activity existed
         /// continue to open and show their last quota reading.
         let tokenUsage: CodexTokenUsage?
+        let usageDetail: ProviderUsageDetail?
+        /// Whose reading this was. Optional for the same reason, and kept so a
+        /// remembered one still says it — a reading restored from the archive
+        /// is exactly when "which account is this?" is hardest to answer.
+        let plan: String?
     }
 
     private let defaults: UserDefaults
@@ -70,25 +78,40 @@ struct UsageArchive {
 
         var result: [String: (snapshot: ProviderSnapshot, fetchedAt: Date)] = [:]
         for entry in entries {
-            // Older Codex readings came from rollouts and may include quotas
-            // the live provider no longer displays. Wait for a fresh reading.
-            if entry.id == "codex",
-               entry.windows.contains(where: { $0.id != "primary" && $0.id != "secondary" }) {
-                continue
+            // Spark and code-review are live windows. Older Codex readings also
+            // carried rollout quotas the provider no longer displays. Strip
+            // those leftovers rather than discarding a Spark snapshot — and
+            // do it for every Codex profile, not only the default.
+            let windows: [LimitWindow]
+            if CodexProfile.isCodex(providerID: entry.id) {
+                windows = entry.windows.filter { Self.isLiveCodexWindow($0.id) }
+                if windows.isEmpty { continue }
+            } else {
+                windows = entry.windows
             }
-            let snapshot = ProviderSnapshot(
+            var snapshot = ProviderSnapshot(
                 id: entry.id,
                 displayName: entry.displayName,
-                glyph: entry.glyph,
+                glyph: entry.id == "devin" && entry.glyph == .third ? .devin : entry.glyph,
                 fidelity: entry.fidelity,
                 status: .stale(since: entry.fetchedAt),
-                windows: entry.windows,
+                windows: windows,
                 headlineID: entry.headlineID,
-                tokenUsage: entry.tokenUsage
+                weeklyID: entry.weeklyID,
+                tokenUsage: entry.tokenUsage,
+                usageDetail: entry.usageDetail
             )
+            snapshot.plan = entry.plan
             result[entry.id] = (snapshot, entry.fetchedAt)
         }
         return result
+    }
+
+    /// Window ids the live Codex provider still displays.
+    private static func isLiveCodexWindow(_ id: String) -> Bool {
+        id == "primary" || id == "secondary"
+            || id.hasPrefix("spark")
+            || id.hasPrefix("code-review")
     }
 
     func save(_ readings: [String: (snapshot: ProviderSnapshot, fetchedAt: Date)]) {
@@ -101,7 +124,10 @@ struct UsageArchive {
                 windows: $0.snapshot.windows,
                 fetchedAt: $0.fetchedAt,
                 headlineID: $0.snapshot.headlineID,
-                tokenUsage: $0.snapshot.tokenUsage
+                weeklyID: $0.snapshot.weeklyID,
+                tokenUsage: $0.snapshot.tokenUsage,
+                usageDetail: $0.snapshot.usageDetail,
+                plan: $0.snapshot.plan
             )
         }
         guard let data = try? JSONEncoder().encode(entries) else { return }

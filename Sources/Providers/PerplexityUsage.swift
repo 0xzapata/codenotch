@@ -23,12 +23,14 @@ import Foundation
 enum PerplexityUsage {
     /// The quotas worth a line, in the order they are shown. The first is the
     /// headline, so it is the one people actually run out of.
-    private static let counters: [(key: String, label: String)] = [
-        ("remaining_pro", "Pro searches"),
-        ("remaining_research", "Research"),
-        ("remaining_agentic_research", "Agentic research"),
-        ("remaining_labs", "Labs")
-    ]
+    private static var counters: [(key: String, label: String)] {
+        [
+            ("remaining_pro", L10n.t("Pro searches")),
+            ("remaining_research", L10n.t("Research")),
+            ("remaining_agentic_research", L10n.t("Agentic research")),
+            ("remaining_labs", L10n.t("Labs"))
+        ]
+    }
 
     static func windows(fromJSON json: String) throws -> [LimitWindow] {
         guard let data = json.data(using: .utf8),
@@ -51,7 +53,7 @@ enum PerplexityUsage {
            (detail["kind"] as? String) == "exact",
            let remaining = (detail["remaining"] as? NSNumber)?.intValue {
             windows.append(
-                LimitWindow(id: "free_queries", label: "Free queries", remaining: remaining)
+                LimitWindow(id: "free_queries", label: L10n.t("Free queries"), remaining: remaining)
             )
         }
 

@@ -63,9 +63,10 @@ final class ProviderDisconnectionTests: XCTestCase {
         let queued = Probe(id: "b")
         let (store, archive) = makeStore([first, queued])
         store.refreshNow()
-        await fulfillment(of: [started], timeout: 2)
-
+        // Disconnect before the concurrent refresh tasks run so the queued
+        // provider must be rejected without fetching it.
         store.disconnected = [queued.id]
+        await fulfillment(of: [started], timeout: 2)
         await finish(first, in: store)
 
         XCTAssertEqual(queued.calls, 0)
@@ -81,6 +82,12 @@ final class ProviderDisconnectionTests: XCTestCase {
         let (store, archive) = makeStore([first, second])
         store.refreshNow()
         await fulfillment(of: [started], timeout: 2)
+        let firstRead = expectation(description: "First reading published")
+        let subscription = store.$snapshots.filter {
+            $0.contains { $0.id == first.id && $0.hasReading }
+        }.prefix(1).sink { _ in firstRead.fulfill() }
+        await fulfillment(of: [firstRead], timeout: 2)
+        withExtendedLifetime(subscription) {}
         XCTAssertNotNil(archive.load()[first.id])
 
         store.disconnected = [first.id]
@@ -102,7 +109,7 @@ final class ProviderDisconnectionTests: XCTestCase {
         store.disconnected = []
         await finish(provider, in: store)
 
-        XCTAssertTrue(store.snapshots.isEmpty)
+        XCTAssertTrue(store.snapshots.allSatisfy { !$0.hasReading })
         XCTAssertNil(archive.load()[provider.id])
 
         // Only the first request is suspended: the next connection can refresh
@@ -161,19 +168,52 @@ final class ProviderDisconnectionTests: XCTestCase {
         XCTAssertTrue(store.refreshing.isEmpty)
     }
 
+    func testStoppingBeforeTheScheduledRefreshRunsPreventsFetches() async {
+        let provider = Probe(id: "a")
+        let (store, archive) = makeStore([provider])
+        store.refreshNow()
+        store.stop()
+        await waitForResponseProcessing()
+
+        XCTAssertEqual(provider.calls, 0)
+        XCTAssertFalse(store.snapshots.contains { $0.hasReading })
+        XCTAssertNil(archive.load()[provider.id])
+        XCTAssertTrue(store.refreshing.isEmpty)
+
+        await store.refresh()
+        XCTAssertEqual(provider.calls, 1)
+        XCTAssertNotNil(archive.load()[provider.id])
+    }
+
+    func testCancelledRefreshTaskDoesNotStartProviderFetches() async {
+        let provider = Probe(id: "a")
+        let (store, archive) = makeStore([provider])
+        let refresh = Task { await store.refresh() }
+        refresh.cancel()
+        await refresh.value
+
+        XCTAssertEqual(provider.calls, 0)
+        XCTAssertFalse(store.snapshots.contains { $0.hasReading })
+        XCTAssertNil(archive.load()[provider.id])
+        XCTAssertTrue(store.refreshing.isEmpty)
+    }
+
     private func finish(_ provider: Probe, in store: UsageStore,
                         error: UsageProviderError? = nil) async {
         let finished = expectation(description: "Refresh finished")
-        let subscription = store.$refreshing.dropFirst().filter(\.isEmpty).prefix(1)
+        let subscription = store.$refreshing.filter(\.isEmpty).prefix(1)
             .sink { _ in finished.fulfill() }
         provider.resolve(error: error)
         await fulfillment(of: [finished], timeout: 2)
+        // Cancellation clears the spinner before an uncooperative fetch returns;
+        // wait for its late response to exercise the result guard.
+        await waitForResponseProcessing()
         withExtendedLifetime(subscription) {}
     }
 
     private func waitForRefreshToFinish(_ store: UsageStore) async {
         let finished = expectation(description: "Scheduled refresh finished")
-        let subscription = store.$refreshing.dropFirst().filter(\.isEmpty).prefix(1)
+        let subscription = store.$refreshing.filter(\.isEmpty).prefix(1)
             .sink { _ in finished.fulfill() }
         await fulfillment(of: [finished], timeout: 2)
         withExtendedLifetime(subscription) {}

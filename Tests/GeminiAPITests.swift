@@ -597,7 +597,7 @@ final class GeminiAPISnapshotTests: XCTestCase {
 /// its own modification date: the machine's clock must not decide whether a
 /// test passes.
 @MainActor
-final class GeminiCLIActivityMonitorTests: XCTestCase {
+final class GeminiCLIActivityTests: XCTestCase {
     private var root: URL!
     private let now = Date(timeIntervalSince1970: 1_789_000_000)
 
@@ -634,7 +634,7 @@ final class GeminiCLIActivityMonitorTests: XCTestCase {
 
     func testAJustWrittenSessionReadsAsWorking() throws {
         try session(project: "9d2c", projectRoot: "/Users/x/Projects/codenotch", modified: now)
-        let sessions = GeminiCLIActivityMonitor.read(root: root, staleAfter: 45, now: now)
+        let sessions = GeminiCLIActivity.read(root: root, staleAfter: 45, now: now)
         XCTAssertEqual(sessions.count, 1)
         XCTAssertEqual(sessions.first?.state, .busy)
         XCTAssertEqual(sessions.first?.name, "Gemini CLI")
@@ -645,12 +645,12 @@ final class GeminiCLIActivityMonitorTests: XCTestCase {
     /// A finished turn is not work in progress.
     func testAnOldSessionIsNotWorking() throws {
         try session(project: "9d2c", modified: now.addingTimeInterval(-60))
-        XCTAssertTrue(GeminiCLIActivityMonitor.read(root: root, staleAfter: 45, now: now).isEmpty)
+        XCTAssertTrue(GeminiCLIActivity.read(root: root, staleAfter: 45, now: now).isEmpty)
     }
 
     func testNoSessionsIsQuietRatherThanAnError() {
         let absent = root.appendingPathComponent("nowhere")
-        XCTAssertTrue(GeminiCLIActivityMonitor.read(root: absent, staleAfter: 45, now: now).isEmpty)
+        XCTAssertTrue(GeminiCLIActivity.read(root: absent, staleAfter: 45, now: now).isEmpty)
     }
 
     /// Projects accumulate under `~/.gemini/tmp`; only the newest file says what
@@ -660,7 +660,7 @@ final class GeminiCLIActivityMonitorTests: XCTestCase {
                     modified: now.addingTimeInterval(-600))
         try session(project: "live", name: "session-live", projectRoot: "/Users/x/live-thing",
                     modified: now)
-        let sessions = GeminiCLIActivityMonitor.read(root: root, staleAfter: 45, now: now)
+        let sessions = GeminiCLIActivity.read(root: root, staleAfter: 45, now: now)
         XCTAssertEqual(sessions.count, 1)
         XCTAssertEqual(sessions.first?.id, "gemini-api.session-live")
         XCTAssertEqual(sessions.first?.detail, "Working in live-thing")
@@ -671,7 +671,462 @@ final class GeminiCLIActivityMonitorTests: XCTestCase {
     /// session its row.
     func testAMissingProjectRootFallsBackToTheDirectoryName() throws {
         try session(project: "9d2c", modified: now)
-        let sessions = GeminiCLIActivityMonitor.read(root: root, staleAfter: 45, now: now)
+        let sessions = GeminiCLIActivity.read(root: root, staleAfter: 45, now: now)
         XCTAssertEqual(sessions.first?.detail, "Working in 9d2c")
+    }
+}
+
+/// Hermes leaves a session open long after the last question, so the tests are
+/// mostly about what does *not* count: an old session, a closed one, another
+/// provider's, and a lease that has run out.
+final class HermesGeminiActivityTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_789_000_000)
+    private var databases: [URL] = []
+
+    override func tearDownWithError() throws {
+        for url in databases { try? FileManager.default.removeItem(at: url) }
+        databases = []
+    }
+
+    /// One row of `sessions`, defaulted to a live Gemini turn so each test
+    /// states only what it is about.
+    private struct Row {
+        var id = "s1"
+        var provider = "gemini"
+        var startedAt: Date
+        var endedAt: Date?
+        var lastActivityAt: Date
+        var cwd = "/Users/x/Projects/codenotch"
+        var title = "Untitled"
+        /// When set, a `session_turn_leases` row for this session.
+        var leaseExpiresAt: Date?
+    }
+
+    /// Written and closed before the reader opens it, so the WAL is
+    /// checkpointed away — the same state a quit Hermes leaves behind.
+    /// `withLeases: false` is the pre-lease schema.
+    private func makeDatabase(rows: [Row], withLeases: Bool = true) throws -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("hermes-activity-\(UUID().uuidString).db")
+        databases.append(url)
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(db, """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, source TEXT NOT NULL DEFAULT '',
+            started_at REAL, ended_at REAL, last_activity_at REAL,
+            billing_provider TEXT NOT NULL DEFAULT '',
+            cwd TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '');
+        """, nil, nil, nil)
+        if withLeases {
+            sqlite3_exec(db, """
+            CREATE TABLE session_turn_leases (
+                conversation_id TEXT PRIMARY KEY, holder TEXT NOT NULL DEFAULT '',
+                acquired_at REAL, expires_at REAL);
+            """, nil, nil, nil)
+        }
+        for row in rows {
+            let ended = row.endedAt.map { "\($0.timeIntervalSince1970)" } ?? "NULL"
+            sqlite3_exec(db, """
+            INSERT INTO sessions VALUES (
+                '\(row.id)', 'desktop', \(row.startedAt.timeIntervalSince1970), \(ended),
+                \(row.lastActivityAt.timeIntervalSince1970), '\(row.provider)',
+                '\(row.cwd)', '\(row.title)', 'gemini-2.5-pro');
+            """, nil, nil, nil)
+            if withLeases, let expires = row.leaseExpiresAt {
+                sqlite3_exec(db, """
+                INSERT INTO session_turn_leases VALUES (
+                    '\(row.id)', 'turn', \(expires.timeIntervalSince1970 - 60),
+                    \(expires.timeIntervalSince1970));
+                """, nil, nil, nil)
+            }
+        }
+        sqlite3_close(db)
+        return url
+    }
+
+    func testAnOpenGeminiSessionJustTouchedReadsAsWorking() throws {
+        let url = try makeDatabase(rows: [
+            Row(startedAt: now.addingTimeInterval(-300), lastActivityAt: now)
+        ])
+        let sessions = HermesGeminiActivity.read(database: url, staleAfter: 45, now: now)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.id, "gemini-api.hermes.s1")
+        XCTAssertEqual(sessions.first?.name, "Hermes")
+        XCTAssertEqual(sessions.first?.detail, "Working in codenotch")
+        XCTAssertEqual(sessions.first?.state, .busy)
+        XCTAssertEqual(sessions.first?.since, now.addingTimeInterval(-300))
+    }
+
+    /// A model can think for minutes without writing anything, and the lease is
+    /// the tool's own word that a turn is running.
+    func testAnUnexpiredLeaseKeepsAQuietSessionBusy() throws {
+        let url = try makeDatabase(rows: [
+            Row(startedAt: now.addingTimeInterval(-600),
+                lastActivityAt: now.addingTimeInterval(-300),
+                leaseExpiresAt: now.addingTimeInterval(120))
+        ])
+        XCTAssertEqual(
+            HermesGeminiActivity.read(database: url, staleAfter: 45, now: now).count, 1)
+    }
+
+    /// The lease expires on a wall clock, so a session whose holder died stops
+    /// claiming to work without anyone tidying up.
+    func testAnExpiredLeaseAndOldActivityIsNotWorking() throws {
+        let url = try makeDatabase(rows: [
+            Row(startedAt: now.addingTimeInterval(-600),
+                lastActivityAt: now.addingTimeInterval(-300),
+                leaseExpiresAt: now.addingTimeInterval(-120))
+        ])
+        XCTAssertTrue(
+            HermesGeminiActivity.read(database: url, staleAfter: 45, now: now).isEmpty)
+    }
+
+    func testAClosedSessionIsNotWorking() throws {
+        let url = try makeDatabase(rows: [
+            Row(startedAt: now.addingTimeInterval(-300), endedAt: now, lastActivityAt: now)
+        ])
+        XCTAssertTrue(
+            HermesGeminiActivity.read(database: url, staleAfter: 45, now: now).isEmpty)
+    }
+
+    /// Hermes bills several providers from the same table; only the Gemini API
+    /// key belongs to this ring.
+    func testAnotherProvidersSessionIsNotWorking() throws {
+        let url = try makeDatabase(rows: [
+            Row(provider: "lmstudio", startedAt: now.addingTimeInterval(-300),
+                lastActivityAt: now)
+        ])
+        XCTAssertTrue(
+            HermesGeminiActivity.read(database: url, staleAfter: 45, now: now).isEmpty)
+    }
+
+    /// A session started outside any project has no folder to name.
+    func testAnEmptyWorkingDirectoryFallsBackToTheTitle() throws {
+        let url = try makeDatabase(rows: [
+            Row(startedAt: now.addingTimeInterval(-300), lastActivityAt: now,
+                cwd: "", title: "Refactor the parser")
+        ])
+        XCTAssertEqual(
+            HermesGeminiActivity.read(database: url, staleAfter: 45, now: now).first?.detail,
+            "Refactor the parser")
+    }
+
+    /// An older Hermes has no lease table. Naming it would fail the whole query,
+    /// which would report every session as idle forever.
+    func testADatabaseWithoutTheLeaseTableStillReportsByRecency() throws {
+        let url = try makeDatabase(rows: [
+            Row(startedAt: now.addingTimeInterval(-300), lastActivityAt: now)
+        ], withLeases: false)
+        XCTAssertEqual(
+            HermesGeminiActivity.read(database: url, staleAfter: 45, now: now).count, 1)
+    }
+
+    func testAMissingDatabaseIsQuietRatherThanAnError() {
+        let absent = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("hermes-nowhere-\(UUID().uuidString).db")
+        XCTAssertTrue(
+            HermesGeminiActivity.read(database: absent, staleAfter: 45, now: now).isEmpty)
+    }
+}
+
+/// The busy signal here is a message OpenCode has not finished writing, not a
+/// file's modification date, so every fixture states the two timestamps and the
+/// recorded `time.completed` shape explicitly.
+final class OpenCodeGeminiActivityTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_789_000_000)
+    private var databases: [URL] = []
+
+    override func tearDownWithError() throws {
+        for url in databases { try? FileManager.default.removeItem(at: url) }
+        databases = []
+    }
+
+    private struct SessionRow {
+        let id: String
+        var parentID: String?
+        var title: String = ""
+        var directory: String = ""
+        let updated: Date
+    }
+
+    private struct MessageRow {
+        let id: String
+        let sessionID: String
+        let created: Date
+        let updated: Date
+        let data: String
+    }
+
+    /// Written and closed before the reader opens it, so the WAL is
+    /// checkpointed away — the same state a quit OpenCode leaves behind.
+    private func makeDatabase(sessions: [SessionRow], messages: [MessageRow]) throws -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("opencode-activity-\(UUID().uuidString).db")
+        databases.append(url)
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(db, """
+        CREATE TABLE session (id TEXT, parent_id TEXT, title TEXT, directory TEXT,
+                              time_updated INTEGER);
+        CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER,
+                              time_updated INTEGER, data TEXT);
+        """, nil, nil, nil)
+        for row in sessions {
+            let parent = row.parentID.map { "'\($0)'" } ?? "NULL"
+            sqlite3_exec(db, """
+            INSERT INTO session VALUES ('\(row.id)', \(parent), '\(row.title)',
+                                        '\(row.directory)',
+                                        \(Int(row.updated.timeIntervalSince1970 * 1000)));
+            """, nil, nil, nil)
+        }
+        for row in messages {
+            sqlite3_exec(db, """
+            INSERT INTO message VALUES ('\(row.id)', '\(row.sessionID)',
+                                        \(Int(row.created.timeIntervalSince1970 * 1000)),
+                                        \(Int(row.updated.timeIntervalSince1970 * 1000)),
+                                        '\(row.data)');
+            """, nil, nil, nil)
+        }
+        sqlite3_close(db)
+        return url
+    }
+
+    private func message(
+        provider: String = "google",
+        role: String = "assistant",
+        created: Date,
+        completed: Date? = nil
+    ) -> String {
+        let completedField = completed
+            .map { #","completed":\#(Int($0.timeIntervalSince1970 * 1000))"# } ?? ""
+        return #"{"role":"\#(role)","providerID":"\#(provider)","modelID":"gemini-2.5-pro","#
+            + #""time":{"created":\#(Int(created.timeIntervalSince1970 * 1000))\#(completedField)}}"#
+    }
+
+    func testAnUnfinishedGoogleTurnReadsAsWorking() throws {
+        let url = try makeDatabase(
+            sessions: [SessionRow(id: "s1", directory: "/Users/x/Projects/codenotch",
+                                  updated: now)],
+            messages: [MessageRow(id: "m1", sessionID: "s1", created: now, updated: now,
+                                  data: message(created: now))]
+        )
+        let sessions = OpenCodeGeminiActivity.read(database: url, staleAfter: 45, now: now)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.id, "gemini-api.opencode.s1")
+        XCTAssertEqual(sessions.first?.name, "OpenCode")
+        XCTAssertEqual(sessions.first?.detail, "Working in codenotch")
+        XCTAssertEqual(sessions.first?.state, .busy)
+        XCTAssertEqual(sessions.first?.since, now)
+        XCTAssertNil(sessions.first?.processID)
+    }
+
+    /// `time.completed` is the whole marker: once OpenCode writes it the turn
+    /// is over, however recently the row was touched.
+    func testAFinishedTurnIsNotWorking() throws {
+        let url = try makeDatabase(
+            sessions: [SessionRow(id: "s1", directory: "/Users/x/Projects/codenotch",
+                                  updated: now)],
+            messages: [MessageRow(id: "m1", sessionID: "s1", created: now, updated: now,
+                                  data: message(created: now, completed: now))]
+        )
+        XCTAssertTrue(OpenCodeGeminiActivity.read(database: url, staleAfter: 45, now: now).isEmpty)
+    }
+
+    /// OpenCode talks to several providers out of one database, and only
+    /// `google` is the Gemini API key this ring is about.
+    func testAnotherProvidersTurnIsNotWorking() throws {
+        let url = try makeDatabase(
+            sessions: [SessionRow(id: "s1", directory: "/Users/x/Projects/codenotch",
+                                  updated: now)],
+            messages: [MessageRow(id: "m1", sessionID: "s1", created: now, updated: now,
+                                  data: message(provider: "lmstudio", created: now))]
+        )
+        XCTAssertTrue(OpenCodeGeminiActivity.read(database: url, staleAfter: 45, now: now).isEmpty)
+    }
+
+    func testAnOldUnfinishedTurnIsNotWorking() throws {
+        let old = now.addingTimeInterval(-600)
+        let url = try makeDatabase(
+            sessions: [SessionRow(id: "s1", directory: "/Users/x/Projects/codenotch",
+                                  updated: old)],
+            messages: [MessageRow(id: "m1", sessionID: "s1", created: old, updated: old,
+                                  data: message(created: old))]
+        )
+        XCTAssertTrue(OpenCodeGeminiActivity.read(database: url, staleAfter: 45, now: now).isEmpty)
+    }
+
+    /// A server that died mid-turn leaves `completed` missing forever while the
+    /// session row keeps being touched, so recency has to be checked on the
+    /// message itself and not only in the SQL pre-filter.
+    func testAFreshSessionWithAStaleMessageIsNotWorking() throws {
+        let old = now.addingTimeInterval(-600)
+        let url = try makeDatabase(
+            sessions: [SessionRow(id: "s1", directory: "/Users/x/Projects/codenotch",
+                                  updated: now)],
+            messages: [MessageRow(id: "m1", sessionID: "s1", created: old, updated: old,
+                                  data: message(created: old))]
+        )
+        XCTAssertTrue(OpenCodeGeminiActivity.read(database: url, staleAfter: 45, now: now).isEmpty)
+    }
+
+    /// A sub-agent is the same piece of work as the session that spawned it.
+    func testASubAgentSessionReportsItsParentOnce() throws {
+        let earlier = now.addingTimeInterval(-5)
+        let url = try makeDatabase(
+            sessions: [
+                SessionRow(id: "p1", directory: "/Users/x/Projects/codenotch", updated: now),
+                SessionRow(id: "c1", parentID: "p1", title: "subagent", updated: now)
+            ],
+            messages: [
+                MessageRow(id: "m1", sessionID: "p1", created: earlier, updated: earlier,
+                           data: message(created: earlier)),
+                MessageRow(id: "m2", sessionID: "c1", created: now, updated: now,
+                           data: message(created: now))
+            ]
+        )
+        let sessions = OpenCodeGeminiActivity.read(database: url, staleAfter: 45, now: now)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.id, "gemini-api.opencode.p1")
+        XCTAssertEqual(sessions.first?.detail, "Working in codenotch")
+    }
+
+    /// A session started outside a project has no directory to name, and the
+    /// title it was given is the next best thing.
+    func testAnEmptyDirectoryFallsBackToTheTitle() throws {
+        let url = try makeDatabase(
+            sessions: [SessionRow(id: "s1", title: "scratch", updated: now)],
+            messages: [MessageRow(id: "m1", sessionID: "s1", created: now, updated: now,
+                                  data: message(created: now))]
+        )
+        XCTAssertEqual(
+            OpenCodeGeminiActivity.read(database: url, staleAfter: 45, now: now).first?.detail,
+            "Working in scratch"
+        )
+    }
+
+    func testAMissingDatabaseReadsAsNoSessions() {
+        let missing = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("opencode-activity-\(UUID().uuidString).db")
+        XCTAssertTrue(
+            OpenCodeGeminiActivity.read(database: missing, staleAfter: 45, now: now).isEmpty
+        )
+    }
+}
+
+/// The three readers answer under one provider id, and the tooltip draws them
+/// in the order they arrive, so the order the monitor concatenates them in is
+/// the behaviour worth pinning: anything else would reshuffle the ring on every
+/// tick. The fixtures are the smallest shape each reader accepts, repeated here
+/// rather than inherited so a change to one reader's test cannot quietly move
+/// this one.
+@MainActor
+final class GeminiAPIActivityMonitorTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_789_000_000)
+    private var temporaries: [URL] = []
+
+    override func tearDownWithError() throws {
+        for url in temporaries { try? FileManager.default.removeItem(at: url) }
+        temporaries = []
+    }
+
+    private func temporary(_ name: String) -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("gemini-api-monitor-\(UUID().uuidString)-\(name)")
+        temporaries.append(url)
+        return url
+    }
+
+    /// One project with one chat file written just now.
+    private func makeGeminiRoot() throws -> URL {
+        let root = temporary("gemini")
+        let chats = root.appendingPathComponent("9d2c/chats")
+        try FileManager.default.createDirectory(at: chats, withIntermediateDirectories: true)
+        try "/Users/x/Projects/codenotch".write(
+            to: root.appendingPathComponent("9d2c/.project_root"),
+            atomically: true, encoding: .utf8)
+        let file = chats.appendingPathComponent("session-a.jsonl")
+        try "{}".write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now],
+                                              ofItemAtPath: file.path)
+        return root
+    }
+
+    /// One session whose newest assistant message has no `time.completed`.
+    private func makeOpenCodeDatabase() throws -> URL {
+        let url = temporary("opencode.db")
+        let millis = Int(now.timeIntervalSince1970 * 1000)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        sqlite3_exec(db, """
+        CREATE TABLE session (id TEXT, parent_id TEXT, title TEXT, directory TEXT,
+                              time_updated INTEGER);
+        CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER,
+                              time_updated INTEGER, data TEXT);
+        INSERT INTO session VALUES ('s1', NULL, 'scratch', '/Users/x/Projects/codenotch',
+                                    \(millis));
+        INSERT INTO message VALUES ('m1', 's1', \(millis), \(millis),
+            '{"role":"assistant","providerID":"google","time":{"created":\(millis)}}');
+        """, nil, nil, nil)
+        sqlite3_close(db)
+        return url
+    }
+
+    /// One open Gemini session touched just now.
+    private func makeHermesDatabase() throws -> URL {
+        let url = temporary("hermes.db")
+        let seconds = now.timeIntervalSince1970
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        sqlite3_exec(db, """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, source TEXT NOT NULL DEFAULT '',
+            started_at REAL, ended_at REAL, last_activity_at REAL,
+            billing_provider TEXT NOT NULL DEFAULT '',
+            cwd TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '');
+        CREATE TABLE session_turn_leases (
+            conversation_id TEXT PRIMARY KEY, holder TEXT NOT NULL DEFAULT '',
+            acquired_at REAL, expires_at REAL);
+        INSERT INTO sessions VALUES ('h1', 'desktop', \(seconds - 300), NULL, \(seconds),
+                                     'gemini', '/Users/x/Projects/codenotch', 'Untitled',
+                                     'gemini-2.5-pro');
+        """, nil, nil, nil)
+        sqlite3_close(db)
+        return url
+    }
+
+    func testTheThreeSourcesAreReportedInTooltipOrder() throws {
+        let sessions = GeminiAPIActivityMonitor.read(
+            geminiRoot: try makeGeminiRoot(),
+            opencodeDatabase: try makeOpenCodeDatabase(),
+            hermesDatabase: try makeHermesDatabase(),
+            staleAfter: 45,
+            now: now
+        )
+        XCTAssertEqual(sessions.map(\.name), ["Gemini CLI", "OpenCode", "Hermes"])
+        XCTAssertEqual(sessions.map(\.id), [
+            "gemini-api.session-a",
+            "gemini-api.opencode.s1",
+            "gemini-api.hermes.h1"
+        ])
+        XCTAssertTrue(sessions.allSatisfy { $0.state == .busy })
+    }
+
+    /// A machine with none of the three tools installed must read as quiet, not
+    /// as an error the ring cannot show.
+    func testNoSourceAtAllReadsAsNoSessions() {
+        XCTAssertTrue(GeminiAPIActivityMonitor.read(
+            geminiRoot: temporary("gemini"),
+            opencodeDatabase: temporary("opencode.db"),
+            hermesDatabase: temporary("hermes.db"),
+            staleAfter: 45,
+            now: now
+        ).isEmpty)
     }
 }

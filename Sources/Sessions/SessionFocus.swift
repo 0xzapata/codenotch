@@ -10,13 +10,63 @@ import Foundation
 /// up the process tree until something turns up that macOS considers an
 /// application, and that is what gets raised.
 ///
-/// This stops at the application. Selecting the *tab* inside it needs the
-/// terminal's own scripting interface and there is no general one: Terminal.app
-/// and iTerm2 can match a tab by tty over AppleScript, Warp and Ghostty publish
-/// no scripting dictionary at all. Rather than work for two terminals and
-/// silently do nothing in a third, the app is raised for everybody and the
-/// tooltip names the session so the last hop is one keystroke.
+/// Raising the app is the answer every terminal gets. Selecting the *tab*
+/// inside it needs the terminal's own scripting interface and there is no
+/// general one — cmux answers through its socket CLI, Terminal.app and iTerm2
+/// by tty over AppleScript, Warp and Ghostty publish nothing. `focus` tries
+/// the tab and settles for the app; `activateApp` is the app-only route.
 enum SessionFocus {
+    /// Select the tab this process runs in where the terminal allows it, then
+    /// raise the owning application either way.
+    ///
+    /// The tab selection runs off the calling actor: cmux's CLI and osascript
+    /// are subprocesses that would otherwise stall the notch's tap handling.
+    @discardableResult
+    static func focus(pid: pid_t) async -> Bool {
+        let app = owningApp(of: pid)
+        let tty = tty(of: pid)
+        let cwd = currentDirectory(of: pid)
+        await Task.detached(priority: .userInitiated) {
+            _ = TerminalTabFocus.selectTab(bundleID: app?.bundleIdentifier, pid: pid, tty: tty, cwd: cwd)
+        }.value
+        guard let app else {
+            Log.usage.debug("no owning app for pid \(pid, privacy: .public)")
+            return false
+        }
+        return await MainActor.run { app.activate() }
+    }
+
+    /// The process's controlling terminal, named the way ps prints it
+    /// (`ttys014`). Nil when it has none — agents with no terminal to go back
+    /// to, which is most desktop-hosted sessions.
+    static func tty(of pid: pid_t) -> String? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0
+        else { return nil }
+        // NODEV (-1) is "no controlling terminal"; devname would read it as a
+        // real device number and answer garbage.
+        guard info.kp_eproc.e_tdev != -1,
+              let name = devname(info.kp_eproc.e_tdev, S_IFCHR)
+        else { return nil }
+        return String(cString: name)
+    }
+
+    /// The process's working directory — how a terminal that publishes no tty
+    /// (cmux's AppleScript interface) can still name the tab it lives in.
+    static func currentDirectory(of pid: pid_t) -> String? {
+        var info = proc_vnodepathinfo()
+        let read = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info,
+                                Int32(MemoryLayout<proc_vnodepathinfo>.size))
+        guard read == Int32(MemoryLayout<proc_vnodepathinfo>.size) else { return nil }
+        return withUnsafePointer(to: &info.pvi_cdir.vip_path) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
+                String(cString: $0)
+            }
+        }
+    }
+
     /// Raise whichever application owns this process.
     ///
     /// Returns false when the chain runs out before an application appears,

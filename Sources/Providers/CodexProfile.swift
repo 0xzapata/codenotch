@@ -48,6 +48,11 @@ struct CodexProfile: Equatable, Hashable {
 
     // Preserve the default id so existing readings and preferences survive.
     var id: String { slug.map { "\(Self.defaultID)-\($0)" } ?? Self.defaultID }
+
+    /// Whether a provider id names a Codex profile, default or otherwise.
+    static func isCodex(providerID: String) -> Bool {
+        providerID == defaultID || providerID.hasPrefix(defaultID + "-")
+    }
     var displayName: String { slug.map { "Codex (\($0))" } ?? "Codex" }
 
     static func slug(fromProviderID id: String) -> String? {

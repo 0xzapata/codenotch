@@ -31,20 +31,20 @@ enum NotchSize: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .small:  return "Small"
-        case .medium: return "Medium"
-        case .large:  return "Large"
+        case .small:  return L10n.t("Small")
+        case .medium: return L10n.t("Medium")
+        case .large:  return L10n.t("Large")
         }
     }
 
     var explanation: String {
         switch self {
         case .small:
-            return "Takes the least room on the edge. Readable, but not from across the desk."
+            return L10n.t("Takes the least room on the edge. Readable, but not from across the desk.")
         case .medium:
-            return "The size the notch was drawn at."
+            return L10n.t("The size the notch was drawn at.")
         case .large:
-            return "Easier to read at a glance, and harder to ignore."
+            return L10n.t("Easier to read at a glance, and harder to ignore.")
         }
     }
 }

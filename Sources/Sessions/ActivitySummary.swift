@@ -6,23 +6,34 @@ struct ActivitySummary: Equatable {
     enum State: Equatable {
         case working
         case waiting
+        case success
         case idle
     }
 
     let state: State
     let sessions: [AgentSession]
+    /// Requests lined up behind the one running — a local runtime's queue.
+    /// Zero for every cloud agent, which has no such line to report.
+    let queued: Int
+    /// What the tooltip's header says while this is going on, where a local
+    /// runtime names the phase. Nil leaves the header to the session's name.
+    let note: String?
 
     /// Nil when nothing is running — the cell disappears rather than sitting
     /// there saying nothing.
-    init?(sessions: [AgentSession]) {
+    init?(sessions: [AgentSession], queued: Int = 0, note: String? = nil) {
         guard !sessions.isEmpty else { return nil }
         self.sessions = sessions
+        self.queued = max(0, queued)
+        self.note = note
         // Anything blocked on you outranks anything merely busy: it is the only
         // state where the notch is asking for something.
         if sessions.contains(where: { $0.state == .waiting }) {
             state = .waiting
         } else if sessions.contains(where: { $0.state == .busy }) {
             state = .working
+        } else if sessions.contains(where: { $0.state == .success }) {
+            state = .success
         } else {
             state = .idle
         }
@@ -31,9 +42,10 @@ struct ActivitySummary: Equatable {
     /// One short word, for the tooltip.
     var label: String {
         switch state {
-        case .working: return "working"
-        case .waiting: return "waiting"
-        case .idle:    return "idle"
+        case .working: return L10n.t("working")
+        case .waiting: return L10n.t("waiting")
+        case .success: return L10n.t("complete")
+        case .idle:    return L10n.t("idle")
         }
     }
 
@@ -45,6 +57,7 @@ struct ActivitySummary: Equatable {
         switch state {
         case .working: return Palette.textPrimary
         case .waiting: return Palette.watch
+        case .success: return Palette.ample
         case .idle:    return Palette.ringTrack
         }
     }

@@ -4,21 +4,23 @@ import Foundation
 /// still working".
 enum ElapsedCopy {
     /// The same span, phrased as a point in the past.
-    static func ago(since: Date, now: Date = Date()) -> String {
-        let elapsed = text(since: since, now: now)
-        return elapsed == "just now" ? elapsed : "\(elapsed) ago"
+    static func ago(since: Date, now: Date = Date(), locale: Locale = L10n.locale) -> String {
+        let elapsed = text(since: since, now: now, locale: locale)
+        return elapsed == L10n.t("just now", locale: locale)
+            ? elapsed
+            : L10n.t("\(elapsed) ago", locale: locale)
     }
 
-    static func text(since: Date, now: Date = Date()) -> String {
+    static func text(since: Date, now: Date = Date(), locale: Locale = L10n.locale) -> String {
         let seconds = max(0, now.timeIntervalSince(since))
-        if seconds < 45 { return "just now" }
+        if seconds < 45 { return L10n.t("just now", locale: locale) }
 
         let minutes = Int((seconds / 60).rounded())
-        if minutes < 60 { return "\(max(1, minutes)) min" }
+        if minutes < 60 { return L10n.t("\(max(1, minutes)) min", locale: locale) }
 
         let hours = minutes / 60
         let rest = minutes % 60
-        if rest == 0 { return "\(hours) hr" }
-        return "\(hours) hr \(rest) min"
+        if rest == 0 { return L10n.t("\(hours) hr", locale: locale) }
+        return L10n.t("\(hours) hr \(rest) min", locale: locale)
     }
 }

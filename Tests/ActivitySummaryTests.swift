@@ -60,7 +60,8 @@ final class CursorActivityTests: XCTestCase {
                         name: String? = nil,
                         subtitle: String? = nil,
                         blocking: Bool? = nil,
-                        plan: Bool? = nil) -> String {
+                        plan: Bool? = nil,
+                        subagent: Bool? = nil) -> String {
         var head: [String: Any] = [:]
         head["composerId"] = id
         head["unfinishedRunAt"] = run.map(millis)
@@ -71,6 +72,7 @@ final class CursorActivityTests: XCTestCase {
         head["subtitle"] = subtitle
         head["hasBlockingPendingActions"] = blocking
         head["hasPendingPlan"] = plan
+        head["isSubagent"] = subagent
         let data = try! JSONSerialization.data(withJSONObject: head)
         return String(data: data, encoding: .utf8)!
     }
@@ -123,14 +125,62 @@ final class CursorActivityTests: XCTestCase {
         XCTAssertEqual(s.state, .busy)
     }
 
-    /// A blocked row still counts with the editor shut — it really is waiting
-    /// on you — but it must not be dated by a run that never finished.
+    /// A blocked row still counts with the editor shut when the write is
+    /// recent — you may have crashed mid-approval — but it must not be dated
+    /// by a run that never finished.
     func testWaitingSurvivesAClosedEditorButNotAStaleRunTime() throws {
         let checkpoint = runAt.addingTimeInterval(18_170)
         let s = try XCTUnwrap(session(header(checkpoint: checkpoint, plan: true),
                                       launchedAt: nil))
         XCTAssertEqual(s.state, .waiting)
         XCTAssertEqual(s.since, checkpoint)
+    }
+
+    /// The June `agents-memory-updater` zombies: Cursor leaves
+    /// `hasBlockingPendingActions` set on finished subagent composers, and
+    /// waiting used to ignore both the launch gate and the staleness window.
+    func testAStaleWaitingRowFromBeforeThisLaunchIsNotListed() {
+        XCTAssertNil(session(header(run: nil, checkpoint: runAt, plan: true),
+                             launchedAt: runAt.addingTimeInterval(8_170),
+                             now: runAt.addingTimeInterval(8_230)))
+    }
+
+    /// Same flag, editor not even open: a wait that went silent hours ago is
+    /// not still asking for something.
+    func testAStaleWaitingRowIsNotListedWhenTheEditorIsClosed() {
+        XCTAssertNil(session(header(run: nil, checkpoint: runAt, plan: true),
+                             launchedAt: nil,
+                             now: runAt.addingTimeInterval(3600)))
+    }
+
+    /// Waiting is allowed to sit for hours while the editor stays up — you
+    /// have not answered yet, and checkpoints will not move until you do.
+    /// Gating it on the busy-run staleness window would hide a plan from this
+    /// morning.
+    func testAWaitingRowFromThisLaunchStillCountsAfterHours() throws {
+        let checkpoint = runAt.addingTimeInterval(60)
+        let s = try XCTUnwrap(session(header(run: nil, checkpoint: checkpoint, plan: true),
+                                      launchedAt: runAt,
+                                      staleAfter: 15 * 60,
+                                      now: checkpoint.addingTimeInterval(4 * 3600)))
+        XCTAssertEqual(s.state, .waiting)
+    }
+
+    /// Restarted the editor thirty seconds after it asked: the write predates
+    /// this launch, but it is still recent, so the wait survived the crash.
+    func testARecentWaitingRowSurvivesARestart() throws {
+        let s = try XCTUnwrap(session(header(run: nil, checkpoint: runAt, plan: true),
+                                      launchedAt: runAt.addingTimeInterval(30),
+                                      now: runAt.addingTimeInterval(40)))
+        XCTAssertEqual(s.state, .waiting)
+    }
+
+    /// Nested composers (continual-learning, explore, …) are not their own
+    /// notch rows. The parent chat already carries the busy/waiting state,
+    /// and finished subagents are what left the blocking flag set for months.
+    func testASubagentRowIsNotListedEvenWhenItLooksLive() {
+        XCTAssertNil(session(header(subagent: true)))
+        XCTAssertNil(session(header(run: nil, plan: true, subagent: true)))
     }
 
     /// `unfinishedRunAt` is the composer's creation time, not the current run's:
@@ -179,9 +229,8 @@ final class CursorActivityTests: XCTestCase {
     /// opened is dated from when it was opened — not from the wall clock, which
     /// would restamp it on every two-second poll and republish for ever.
     func testAWaitingRowWithNoWritesFallsBackToCreatedAt() throws {
-        let created = runAt.addingTimeInterval(-981_829)
-        let s = try XCTUnwrap(session(header(run: nil, created: created, plan: true),
-                                      launchedAt: nil))
+        let created = runAt
+        let s = try XCTUnwrap(session(header(run: nil, created: created, plan: true)))
         XCTAssertEqual(s.since, created)
     }
 
@@ -204,7 +253,11 @@ final class CursorActivityTests: XCTestCase {
         
         let justPastEdge = try XCTUnwrap(session(fixture, staleAfter: 60,
                                                  now: runAt.addingTimeInterval(61)))
-        XCTAssertEqual(justPastEdge.state, .idle)
+        XCTAssertEqual(justPastEdge.state, .success)
+
+        let wayPastEdge = try XCTUnwrap(session(fixture, staleAfter: 60,
+                                                 now: runAt.addingTimeInterval(70)))
+        XCTAssertEqual(wayPastEdge.state, .idle)
         
         XCTAssertNil(session(fixture, staleAfter: 60, now: runAt.addingTimeInterval(76)))
     }
@@ -253,9 +306,9 @@ final class CursorActivityTests: XCTestCase {
         let older = runAt
         let newer = runAt.addingTimeInterval(100)
         let url = try makeStore([
-            (header(id: "older", run: older, checkpoint: older), archived: 0),
-            (header(id: "newer", run: newer, checkpoint: newer), archived: 0),
-            (header(id: "filed", run: newer, checkpoint: newer), archived: 1),
+            (header(id: "older", run: older, checkpoint: older), archived: 0, subagent: 0),
+            (header(id: "newer", run: newer, checkpoint: newer), archived: 0, subagent: 0),
+            (header(id: "filed", run: newer, checkpoint: newer), archived: 1, subagent: 0),
         ])
         defer { try? FileManager.default.removeItem(at: url) }
 
@@ -265,21 +318,38 @@ final class CursorActivityTests: XCTestCase {
         XCTAssertEqual(found.map(\.id), ["cursor.newer", "cursor.older"])
     }
 
+    /// Cursor stores `isSubagent` as a column, not always in the JSON value.
+    /// The June zombies had the column set and the header silent about it.
+    func testReadSkipsSubagentColumnEvenWhenTheHeaderOmitsIt() throws {
+        let url = try makeStore([
+            (header(id: "parent", checkpoint: runAt), archived: 0, subagent: 0),
+            (header(id: "nested", checkpoint: runAt), archived: 0, subagent: 1),
+        ])
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let found = CursorActivityMonitor.read(store: url, cursorLaunchedAt: .distantPast,
+                                               staleAfter: 10 * 60,
+                                               now: runAt.addingTimeInterval(1))
+        XCTAssertEqual(found.map(\.id), ["cursor.parent"])
+    }
+
     /// Mirrors `SQLiteStoreTests.makeDatabase`: closing checkpoints the WAL, so
     /// the file reads back the way it would after the editor has quit.
-    private func makeStore(_ rows: [(String, archived: Int)]) throws -> URL {
+    private func makeStore(_ rows: [(String, archived: Int, subagent: Int)]) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("cursor-\(UUID().uuidString).sqlite")
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
         sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
         sqlite3_exec(db, """
-        CREATE TABLE composerHeaders (value TEXT, isArchived INT, recency INT);
+        CREATE TABLE composerHeaders (
+            value TEXT, isArchived INT, recency INT, isSubagent INT
+        );
         """, nil, nil, nil)
         for (index, row) in rows.enumerated() {
             let escaped = row.0.replacingOccurrences(of: "'", with: "''")
             sqlite3_exec(db, """
-            INSERT INTO composerHeaders VALUES ('\(escaped)', \(row.archived), \(index));
+            INSERT INTO composerHeaders VALUES ('\(escaped)', \(row.archived), \(index), \(row.subagent));
             """, nil, nil, nil)
         }
         sqlite3_close(db)

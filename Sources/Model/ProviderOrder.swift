@@ -7,6 +7,17 @@ import Foundation
 /// so an id can appear on a Mac that has never seen it and vanish from one that
 /// has. A stored order is a preference to reconcile, never an authority.
 enum ProviderOrder {
+    /// A runtime's inventory can arrive alphabetically on every poll. Keep its
+    /// existing cells in place and append newly loaded models.
+    static func cells(from snapshots: [ProviderSnapshot],
+                      keeping previous: [ProviderSnapshot]) -> [ProviderSnapshot] {
+        snapshots.flatMap { snapshot in
+            let cells = snapshot.notchSnapshots
+            return snapshot.kind == .localRuntime
+                ? arrange(cells, by: previous.map(\.id), id: \.id) : cells
+        }
+    }
+
     /// `items` in the user's order, then everything the order has never seen, in
     /// the order it arrived in.
     ///

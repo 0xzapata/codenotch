@@ -31,6 +31,80 @@ struct ClaudeUsageCLI: Sendable {
     /// wedged process cannot hold a refresh open. A timeout kills the process.
     static let timeout: TimeInterval = 20
 
+    /// Print mode, no transcript, no MCP servers. Started interactively,
+    /// `/usage` also files a session under `<config>/projects/`, one per call,
+    /// and can put up the workspace-trust dialogue for a directory Claude Code
+    /// has not seen. `--print` skips the dialogue, and
+    /// `--no-session-persistence`, which only exists in print mode, skips the
+    /// transcript. The lines this reads are the same either way.
+    ///
+    /// `--strict-mcp-config` with no `--mcp-config` means no MCP server at all.
+    /// Without it every poll starts whatever the user has configured in
+    /// `~/.claude.json` and their settings, which on a busy machine is a dozen
+    /// Node processes and their connections to GitHub, Cloudflare and the like,
+    /// none of which `/usage` needs. Measured on Claude Code 2.1.259: with the
+    /// flag the process talks to api.anthropic.com and Claude Code's own
+    /// feature-gate host only. (`--mcp-config '{}'` is not an option: the flag
+    /// is variadic and swallows `/usage` as a second config path.)
+    ///
+    /// Telemetry is deliberately left on. `DISABLE_TELEMETRY` and
+    /// `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` also stop the feature-gate
+    /// fetch, and the per-model weekly line (`Current week (Fable)`) is behind
+    /// one of those gates: with either set, `/usage` no longer prints it.
+    static let arguments = ["--print", "--no-session-persistence", "--strict-mcp-config", "/usage"]
+
+    /// Where `/usage` is run from: one directory, kept for the life of the
+    /// install.
+    ///
+    /// Claude Code keys the transcript folder it writes under
+    /// `<config>/projects/` on the working directory. A fresh temporary
+    /// directory per call, which is what this did before, therefore left a
+    /// new, never-revisited project folder behind on every poll: twelve an
+    /// hour, indefinitely. One fixed directory means at most one folder, and
+    /// with `arguments` above no transcript at all.
+    static func scratchDirectory(
+        applicationSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                           in: .userDomainMask)[0],
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        let directory = scratchLocation(applicationSupport: applicationSupport)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// Where `scratchDirectory` lives, without creating it. The session
+    /// monitor compares working directories against this, so it needs the
+    /// path before the first poll has run.
+    static func scratchLocation(
+        applicationSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                           in: .userDomainMask)[0]
+    ) -> URL {
+        applicationSupport
+            .appendingPathComponent("Codenotch", isDirectory: true)
+            .appendingPathComponent("usage-scratch", isDirectory: true)
+    }
+
+    // MARK: - Its own sessions
+
+    /// The `/usage` processes running right now, by pid.
+    ///
+    /// Each one is a Claude Code process like any other, and files a session
+    /// under `~/.claude/sessions` for the seconds it lives. `ClaudeSessionMonitor`
+    /// steps over these pids (see `ignoredPIDs`) so the probe never reaches the
+    /// notch. Left in, it did worse than draw a row: it ran `busy`, then
+    /// vanished, and the completion watcher announced "usage-scratch-e1
+    /// finished" as a banner on every poll that spawned it.
+    static var runningPIDs: Set<Int32> { running.all }
+    private static let running = PIDRegistry()
+
+    private final class PIDRegistry: @unchecked Sendable {
+        private let lock = NSLock()
+        private var pids: Set<Int32> = []
+        var all: Set<Int32> { lock.lock(); defer { lock.unlock() }; return pids }
+        func insert(_ pid: Int32) { lock.lock(); pids.insert(pid); lock.unlock() }
+        func remove(_ pid: Int32) { lock.lock(); pids.remove(pid); lock.unlock() }
+    }
+
     // MARK: - Finding the binary
 
     /// Every path Claude Code installs itself to, newest installer first.
@@ -40,8 +114,34 @@ struct ClaudeUsageCLI: Sendable {
     private static let searchPaths = [
         ".local/bin/claude",     // the native installer
         ".claude/local/claude",  // the migrate-from-npm layout
-        ".bun/bin/claude"
+        ".bun/bin/claude",
+        ".volta/bin/claude",     // Volta's shim directory
+        "Library/pnpm/claude",   // pnpm's global bin on macOS
+        ".npm-global/bin/claude" // npm with a user-level prefix
     ]
+
+    /// Where a Node version manager puts an `npm install -g` — a directory
+    /// named for the Node version, which no fixed path can spell.
+    ///
+    /// npm is still how most people install Claude Code, and under `nvm` the
+    /// binary lands in `~/.nvm/versions/node/<version>/bin`. Without this,
+    /// `locate` returns nil on those machines and the app falls back to the
+    /// token path, which is the one that has to keep asking for the keychain.
+    ///
+    /// Newest version first: upgrading Node leaves every older tree in place,
+    /// each with whatever was installed against it at the time, and only the
+    /// current one is certainly the install being run. `.numeric` rather than
+    /// a semver parse, because the names are `v20.20.2` and `v22.22.3` and the
+    /// only thing asked of the order is that 22 sorts above 20 — which a plain
+    /// string comparison gets backwards.
+    private static func nodeVersionCandidates(home: URL, fileManager: FileManager) -> [URL] {
+        let versions = home.appendingPathComponent(".nvm/versions/node")
+        guard let names = try? fileManager.contentsOfDirectory(atPath: versions.path)
+        else { return [] }
+        return names
+            .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+            .map { versions.appendingPathComponent($0).appendingPathComponent("bin/claude") }
+    }
 
     /// Relative to the filesystem root rather than absolute, so a test can point
     /// the whole search at a temporary directory. Left absolute, `locate` would
@@ -57,7 +157,11 @@ struct ClaudeUsageCLI: Sendable {
     static func locate(home: URL = ClaudeProfile.homeDirectory,
                        root: URL = URL(fileURLWithPath: "/"),
                        fileManager: FileManager = .default) -> ClaudeUsageCLI? {
+        // Version-manager trees come after the fixed paths and before the
+        // system ones, so an installation Claude Code maintains itself still
+        // wins over a copy npm happens to have left in an old Node tree.
         let candidates = searchPaths.map { home.appendingPathComponent($0) }
+            + nodeVersionCandidates(home: home, fileManager: fileManager)
             + systemPaths.map { root.appendingPathComponent($0) }
         guard let found = candidates.first(where: {
             fileManager.isExecutableFile(atPath: $0.path)
@@ -81,14 +185,35 @@ struct ClaudeUsageCLI: Sendable {
         return try Self.parse(text, now: now)
     }
 
+    /// The named tier `/usage` prints above the windows, copied as printed.
+    static func plan(in text: String) -> String? {
+        let head = text.split(whereSeparator: \.isNewline).prefix(4).joined(separator: "\n")
+        for phrase in ["Max 20x", "Max 5x", "extra usage", "Max", "Pro", "Team"] {
+            if let match = head.range(of: phrase, options: .caseInsensitive) {
+                if phrase == "Max", head.range(of: "Max 5x", options: .caseInsensitive) != nil
+                    || head.range(of: "Max 20x", options: .caseInsensitive) != nil {
+                    continue
+                }
+                return String(head[match])
+            }
+        }
+        return nil
+    }
+
+    func readWithPlan(profile: ClaudeProfile, now: Date = Date()) async throws -> (windows: [LimitWindow], plan: String?) {
+        let text = try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(with: Result { try self.output(profile) })
+            }
+        }
+        return (try Self.parse(text, now: now), Self.plan(in: text))
+    }
+
     private static func run(binary: URL, profile: ClaudeProfile) throws -> String {
-        // A directory of its own, so a session artifact written on the way past
-        // lands somewhere disposable rather than in whatever directory the app
-        // happened to be launched from.
-        let scratch = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codenotch-usage-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: scratch) }
+        // A directory of its own, so nothing Claude Code writes on the way
+        // past lands in whatever directory the app happened to be launched
+        // from. See `scratchDirectory` for why it is the same one every time.
+        let scratch = try scratchDirectory()
 
         var environment = ProcessInfo.processInfo.environment
         // Only for a named profile. Pointing the variable at `~/.claude`
@@ -103,7 +228,7 @@ struct ClaudeUsageCLI: Sendable {
 
         let process = Process()
         process.executableURL = binary
-        process.arguments = ["/usage"]
+        process.arguments = Self.arguments
         process.currentDirectoryURL = scratch
         process.environment = environment
         // Never a terminal. Left inheriting the app's stdin, `claude` waits for
@@ -112,9 +237,16 @@ struct ClaudeUsageCLI: Sendable {
         process.standardInput = FileHandle.nullDevice
         let output = Pipe()
         process.standardOutput = output
-        process.standardError = Pipe()
+        // Discarded, not piped: a pipe nobody reads fills at 64 KB and stalls
+        // the CLI until the watchdog kills it.
+        process.standardError = FileHandle.nullDevice
 
         try process.run()
+        // Recorded the moment the process exists, ahead of the session file it
+        // will write a moment later once Node is up.
+        let pid = process.processIdentifier
+        running.insert(pid)
+        defer { running.remove(pid) }
 
         let watchdog = DispatchWorkItem {
             if process.isRunning { process.terminate() }

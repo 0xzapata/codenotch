@@ -13,7 +13,9 @@ struct UsagePace {
             ? "<0.1"
             : String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), rounded)
                 .replacingOccurrences(of: ".0", with: "")
-        return "\(value)% \(isDeficit ? "deficit" : "reserved")"
+        return isDeficit
+            ? L10n.t("\(value)% deficit")
+            : L10n.t("\(value)% reserved")
     }
 }
 

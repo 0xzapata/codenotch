@@ -15,11 +15,31 @@ import SwiftUI
 final class NotchFleet {
     private var controllers: [NSNumber: NotchWindowController] = [:]
     private var cancellables = Set<AnyCancellable>()
+    /// A model with no panel: what the menu bar's menu reads. Fed everything
+    /// the displays' models are fed, so a model's line there is decorated —
+    /// speed, context, phase, today's tokens — exactly as its cell is.
+    let menuModel = NotchViewModel()
+    /// Every model a reading has to reach.
+    private var models: [NotchViewModel] { [menuModel] + controllers.values.map(\.model) }
 
     private(set) var scope: NotchScreenScope
     private var edge: NotchEdge
     private var visibility: NotchVisibility = .onHover
+
     private var snapshots: [ProviderSnapshot] = []
+    private(set) var thinkingModels: [String: Date] = [:]
+    /// Per source, the way the view model keeps them: the Ollama relay and
+    /// the LM Studio log each replace their own readings wholesale.
+    private var performances: [String: [String: LocalModelPerformance]] = [:]
+    private var localActivities: [String: LocalModelActivity] = [:]
+    private var ledger = LocalTokenLedger()
+    private var localMetricsEnabled = false
+
+    func setLocalMetricsEnabled(_ enabled: Bool) {
+        localMetricsEnabled = enabled
+        if !enabled { performances[NotchViewModel.ollamaSource] = nil; thinkingModels = [:] }
+        for model in models { model.setLocalMetricsEnabled(enabled) }
+    }
     private var refreshing: Set<String> = []
     /// Exposed read-only rather than private: completion-watching needs the
     /// merged dict after a fan-out, the same way it read `controller.model
@@ -32,22 +52,64 @@ final class NotchFleet {
     private var displayPreference: DisplayPreference = .followActiveWindow
     private var resetTimeFormat: ResetTimeFormat = .automatic
     private var accentColor: AccentColorChoice = .system
+    private var watchLimit: Double = 0.50
+    private var criticalLimit: Double = 0.70
+    private var colorTransitionStyle: ColorTransitionStyle = .hardStep
+    /// One choice for the whole fleet, like the edge and the size: a weekly
+    /// ring on one display and not another would read as a bug.
+    private var weeklyRing: WeeklyRing = .off
+    private var weeklyRingDashed: Bool = false
+    private var showsNotchReadings: Bool = true
+    private var weeklyReading: Bool = false
+    private var foldsForFullScreen = true
+    private var surfaceStyle: NotchSurfaceStyle = .glass
+    private var deepSeekPricingEnabled = true
+    private var deepSeekPricingSchedule = DeepSeekPricing.Schedule.current
     /// The ⌥-drag nudge along the current edge. One value for the whole
     /// fleet, the same as `edge` itself — displays do not each get their own
     /// edge, so they do not each get their own nudge either.
     private var alongOffset: CGFloat = 0
     /// One size for the whole fleet, for the same reason the edge is: a notch
     /// that were larger on one display than another would read as a bug.
-    private var size: NotchSize = .medium
+    private var scale: CGFloat = 1
 
     /// Hooked up by the app delegate; driven by the notch's own chrome.
     var onRefresh: (() -> Void)?
-    var onRefreshProvider: ((String) -> Void)?
+    /// Every notch reports a look through the same closure: the store spaces
+    /// them, so two screens' notches opening together are one fetch.
+    var onLook: (() -> Void)?
+    var onRefreshProvider: ((String) async -> Void)?
     var onOpenSettings: (() -> Void)?
+    /// The notch's answer to an update it offered.
+    var onUpdateChoice: ((UpdateChoice) -> Void)?
+    private var updatePrompt: UpdatePrompt?
+
+    private var updatePending = false
+
+    /// A newer version waiting — see `NotchViewModel.updatePending`.
+    func apply(updatePending: Bool) {
+        self.updatePending = updatePending
+        for controller in controllers.values {
+            controller.model.updatePending = updatePending
+        }
+    }
+
+    /// An update to offer in the notch, or how its install is going; nil once
+    /// answered or done.
+    func apply(updatePrompt: UpdatePrompt?) {
+        self.updatePrompt = updatePrompt
+        for controller in controllers.values {
+            controller.apply(updatePrompt: updatePrompt)
+        }
+    }
+    var onFocusSession: ((pid_t) -> Void)?
     var signInItems: [(title: String, action: () -> Void)] = []
     /// An ⌥-drag on any one panel settled at a new offset. Persisting it is
     /// Preferences' job, same division `apply(edge:)` already keeps.
     var onReposition: ((CGFloat) -> Void)?
+    /// A move handle carried a notch to another edge. Persisting it is
+    /// Preferences' job, the same division `onReposition` keeps.
+    var onMoveToEdge: ((NotchEdge, CGFloat?) -> Void)?
 
     /// What the fleet settled on, for tests that need to see panels come and
     /// go rather than take our word for it.
@@ -130,6 +192,59 @@ final class NotchFleet {
         }
     }
 
+    func apply(foldsForFullScreen: Bool) {
+        self.foldsForFullScreen = foldsForFullScreen
+        for controller in controllers.values {
+            controller.apply(foldsForFullScreen: foldsForFullScreen)
+        }
+    }
+
+    func apply(showsNotchReadings: Bool) {
+        self.showsNotchReadings = showsNotchReadings
+        // Through the controller, which relays the window out: this one
+        // changes the ring's size and so the notch's own length.
+        for controller in controllers.values {
+            controller.apply(showsNotchReadings: showsNotchReadings)
+        }
+    }
+
+    func apply(weeklyReading: Bool) {
+        self.weeklyReading = weeklyReading
+        for controller in controllers.values {
+            controller.model.weeklyReading = weeklyReading
+        }
+    }
+
+    func apply(weeklyRingDashed: Bool) {
+        self.weeklyRingDashed = weeklyRingDashed
+        for controller in controllers.values {
+            controller.model.weeklyRingDashed = weeklyRingDashed
+        }
+    }
+
+    func apply(weeklyRing: WeeklyRing) {
+        self.weeklyRing = weeklyRing
+        for controller in controllers.values {
+            controller.model.weeklyRing = weeklyRing
+        }
+    }
+
+    func apply(watchLimit: Double, criticalLimit: Double) {
+        self.watchLimit = watchLimit
+        self.criticalLimit = criticalLimit
+        for controller in controllers.values {
+            controller.model.watchLimit = watchLimit
+            controller.model.criticalLimit = criticalLimit
+        }
+    }
+
+    func apply(colorTransitionStyle: ColorTransitionStyle) {
+        self.colorTransitionStyle = colorTransitionStyle
+        for controller in controllers.values {
+            controller.model.colorTransitionStyle = colorTransitionStyle
+        }
+    }
+
     func apply(accentColor: AccentColorChoice) {
         self.accentColor = accentColor
         for controller in controllers.values {
@@ -137,20 +252,41 @@ final class NotchFleet {
         }
     }
 
+    func apply(surfaceStyle: NotchSurfaceStyle) {
+        self.surfaceStyle = surfaceStyle
+        for controller in controllers.values {
+            controller.model.surfaceStyle = surfaceStyle
+        }
+    }
+
+    func apply(deepSeekPricingEnabled: Bool) {
+        self.deepSeekPricingEnabled = deepSeekPricingEnabled
+        for controller in controllers.values {
+            controller.model.deepSeekPricingEnabled = deepSeekPricingEnabled
+        }
+    }
+
+    func apply(deepSeekPricingSchedule: DeepSeekPricing.Schedule) {
+        self.deepSeekPricingSchedule = deepSeekPricingSchedule
+        for controller in controllers.values {
+            controller.model.deepSeekPricingSchedule = deepSeekPricingSchedule
+        }
+    }
+
     func apply(alongOffset: CGFloat) {
         self.alongOffset = alongOffset
         for controller in controllers.values {
-            controller.model.alongOffset = alongOffset
+            controller.apply(alongOffset: alongOffset)
         }
     }
 
     /// Through `controller.apply(size:)` rather than by setting the model
     /// directly, because the panel has to be rebuilt around the new size —
     /// the same division `apply(edge:)` keeps.
-    func apply(size: NotchSize) {
-        self.size = size
+    func apply(scale: CGFloat) {
+        self.scale = scale
         for controller in controllers.values {
-            controller.apply(size: size)
+            controller.apply(scale: scale)
         }
     }
 
@@ -159,11 +295,38 @@ final class NotchFleet {
     func setSnapshots(_ snapshots: [ProviderSnapshot]) {
         self.snapshots = snapshots
         let now = Date()
-        for controller in controllers.values {
-            withAnimation(NotchMotion.unfold) {
-                controller.model.snapshots = snapshots
-            }
-            controller.model.now = now
+        for model in models {
+            model.updateSnapshots(snapshots)
+            model.now = now
+        }
+    }
+
+    func setThinkingModels(_ thinking: [String: Date]) {
+        thinkingModels = thinking
+        for model in models {
+            model.thinkingModels = thinking
+        }
+    }
+
+    func setPerformances(_ measurements: [String: LocalModelPerformance],
+                         source: String = NotchViewModel.ollamaSource) {
+        performances[source] = measurements
+        for model in models {
+            model.updatePerformances(measurements, source: source)
+        }
+    }
+
+    func setLocalActivities(_ activities: [String: LocalModelActivity]) {
+        localActivities = activities
+        for model in models {
+            model.localActivities = activities
+        }
+    }
+
+    func setLedger(_ ledger: LocalTokenLedger) {
+        self.ledger = ledger
+        for model in models {
+            model.updateLedger(ledger)
         }
     }
 
@@ -176,6 +339,18 @@ final class NotchFleet {
         }
     }
 
+    /// Shows a usage reset notification modal on every panel.
+    /// Returns whether at least one notch had somewhere to show the card. With
+    /// every notch hidden the alert would otherwise vanish without a trace.
+    @discardableResult
+    func showResetAlert(_ event: UsageResetEvent, duration: TimeInterval = 5.0) -> Bool {
+        var shown = false
+        for controller in controllers.values {
+            shown = controller.showResetAlert(event, duration: duration) || shown
+        }
+        return shown
+    }
+
     func setRefreshing(_ ids: Set<String>) {
         self.refreshing = ids
         for controller in controllers.values {
@@ -186,6 +361,8 @@ final class NotchFleet {
     func setSessions(providerID id: String, sessions live: [AgentSession]) {
         sessions[id] = live
         let now = Date()
+        menuModel.sessions[id] = live
+        menuModel.now = now
         for controller in controllers.values {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                 controller.model.sessions[id] = live
@@ -277,20 +454,45 @@ final class NotchFleet {
         let controller = NotchWindowController()
         controller.assignedScreen = screen
         controller.displayPreference = displayPreference
+        controller.foldsForFullScreen = foldsForFullScreen
         controller.model.edge = edge
         controller.model.alongOffset = alongOffset
         // Set before `show()`, so a display plugged in later builds its panel
         // at the current size rather than at medium and resizing a beat later.
-        controller.model.sizeScale = size.scale
+        controller.prime(scale: scale)
         controller.model.resetTimeFormat = resetTimeFormat
         controller.model.accentColor = accentColor
+        controller.model.watchLimit = watchLimit
+        controller.model.criticalLimit = criticalLimit
+        controller.model.colorTransitionStyle = colorTransitionStyle
+        controller.model.weeklyRing = weeklyRing
+        controller.model.weeklyRingDashed = weeklyRingDashed
+        controller.model.showsNotchReadings = showsNotchReadings
+        controller.model.weeklyReading = weeklyReading
+        controller.model.surfaceStyle = surfaceStyle
+        controller.model.deepSeekPricingEnabled = deepSeekPricingEnabled
+        controller.model.deepSeekPricingSchedule = deepSeekPricingSchedule
+
         controller.onRefresh = onRefresh
+        controller.onLook = { [weak self] in self?.onLook?() }
         controller.onRefreshProvider = onRefreshProvider
         controller.onOpenSettings = onOpenSettings
         controller.model.onOpenSettings = onOpenSettings
+        controller.model.onFocusSession = onFocusSession
+        controller.model.onUpdateChoice = { [weak self] in self?.onUpdateChoice?($0) }
+        controller.apply(updatePrompt: updatePrompt)
+        controller.model.updatePending = updatePending
         controller.onReposition = onReposition
+        controller.onMoveToEdge = onMoveToEdge
         controller.signInItems = signInItems
-        controller.model.snapshots = snapshots
+        controller.model.updateSnapshots(snapshots)
+        controller.model.thinkingModels = thinkingModels
+        controller.model.localActivities = localActivities
+        controller.model.setLocalMetricsEnabled(localMetricsEnabled)
+        for (source, measurements) in performances {
+            controller.model.updatePerformances(measurements, source: source)
+        }
+        controller.model.updateLedger(ledger)
         controller.model.refreshing = refreshing
         controller.model.sessions = sessions
         controller.model.now = Date()

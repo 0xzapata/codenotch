@@ -56,9 +56,7 @@ actor GeminiAPIProvider: UsageProvider {
     }
 
     nonisolated var signInRoute: SignInRoute {
-        .guidance("There is nothing to sign in to: the count is added up from what "
-                  + "Gemini CLI, OpenCode and Hermes recorded about their own calls. "
-                  + "Your API key is never read.")
+        .guidance(L10n.t("There is nothing to sign in to: the count is added up from what Gemini CLI, OpenCode and Hermes recorded about their own calls. Your API key is never read."))
     }
 
     nonisolated func account() -> ProviderAccount? {
@@ -75,7 +73,7 @@ actor GeminiAPIProvider: UsageProvider {
         // ever run here, so there is genuinely nothing being metered.
         guard !sources.isEmpty else {
             throw UsageProviderError.nothingMetered(
-                "No Gemini CLI, OpenCode or Hermes sessions found")
+                L10n.t("No Gemini CLI, OpenCode or Hermes sessions found"))
         }
         lastTools = sources.map(\.name)
         return Self.snapshot(sources: sources, budget: budget(), now: now)

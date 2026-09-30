@@ -24,20 +24,20 @@ enum PeekDuration: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .brief:    return "3 seconds"
-        case .standard: return "5 seconds"
-        case .long:     return "10 seconds"
+        case .brief:    return L10n.t("3 seconds")
+        case .standard: return L10n.t("5 seconds")
+        case .long:     return L10n.t("10 seconds")
         }
     }
 
     var explanation: String {
         switch self {
         case .brief:
-            return "Long enough to notice, short enough to ignore."
+            return L10n.t("Long enough to notice, short enough to ignore.")
         case .standard:
-            return "Long enough to read the session's name and reach for it."
+            return L10n.t("Long enough to read the session's name and reach for it.")
         case .long:
-            return "Stays until you have had a chance to look up."
+            return L10n.t("Stays until you have had a chance to look up.")
         }
     }
 }

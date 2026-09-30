@@ -57,7 +57,7 @@ enum OllamaUsage {
         if let monthly = limits["monthly"] as? [String: Any] {
             if let usage = monthly["usage"] as? Double, usage > 0 {
                 windows.append(LimitWindow(
-                    id: "monthly", label: "Monthly usage",
+                    id: "monthly", label: L10n.t("Monthly usage"),
                     usedFraction: usage, resetsAt: nil
                 ))
                 headlineID = "monthly"
@@ -69,7 +69,7 @@ enum OllamaUsage {
         if let session = limits["session"] as? [String: Any] {
             if let usage = session["usage"] as? Double, usage > 0 {
                 windows.append(LimitWindow(
-                    id: "session", label: "Session usage",
+                    id: "session", label: L10n.t("Session usage"),
                     usedFraction: usage, resetsAt: nil
                 ))
                 if headlineID == nil { headlineID = "session" }
@@ -80,7 +80,7 @@ enum OllamaUsage {
         if let weekly = limits["weekly"] as? [String: Any] {
             if let usage = weekly["usage"] as? Double, usage > 0 {
                 windows.append(LimitWindow(
-                    id: "weekly", label: "Weekly usage",
+                    id: "weekly", label: L10n.t("Weekly usage"),
                     usedFraction: usage, resetsAt: nil
                 ))
                 // Weekly is the better headline than session for legacy plans.
@@ -91,7 +91,7 @@ enum OllamaUsage {
 
         guard !windows.isEmpty else {
             throw UsageProviderError.nothingMetered(
-                "No Ollama usage recorded yet for this period."
+                L10n.t("No Ollama usage recorded yet for this period.")
             )
         }
 

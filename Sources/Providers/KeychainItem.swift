@@ -32,6 +32,9 @@ enum KeychainItem {
         /// this points at is the one call that can prompt; enumerating to find
         /// it, like reading `modifiedAt`, never does.
         let persistentRef: Data
+        /// The service name it was filed under — needed to reach the same item
+        /// by name when a direct read of it is refused.
+        let service: String
     }
 
     /// The most recently modified item under a service, or nil if there is
@@ -67,7 +70,8 @@ enum KeychainItem {
         items
             .compactMap { item -> Match? in
                 guard let ref = item[kSecValuePersistentRef] as? Data else { return nil }
-                return Match(modifiedAt: item[kSecAttrModificationDate] as? Date, persistentRef: ref)
+                return Match(modifiedAt: item[kSecAttrModificationDate] as? Date, persistentRef: ref,
+                             service: item[kSecAttrService] as? String ?? "")
             }
             // A duplicate with no modification date is possible in principle
             // and worth keeping rather than discarding; `.distantPast` only
@@ -98,8 +102,10 @@ enum KeychainItem {
     }
 
     /// Reads the data from the newest item under a service. The one call that
-    /// can trigger a keychain prompt for items owned by another app — but for
-    /// items this app created itself (`store`), no prompt is involved.
+    /// can trigger a keychain prompt. Items this app created itself (`store`)
+    /// do not prompt either — but only as long as the binary keeps the same
+    /// signing identity that stored them; an ad-hoc rebuild is a new identity,
+    /// which is why even own-item readers go through `CredentialCache`.
     static func read(service: String, account: String? = nil) -> String? {
         guard let match = newest(service: service, account: account) else { return nil }
         var query: [CFString: Any] = [

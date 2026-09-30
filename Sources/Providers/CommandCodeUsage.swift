@@ -33,22 +33,22 @@ enum CommandCodeUsage {
         let remaining = number(credits["monthlyCredits"]) ?? 0
         let cap = (used > 0 || remaining > 0) ? used + remaining : 0
         guard cap > 0 else {
-            throw UsageProviderError.nothingMetered("Command Code has nothing metered on this account yet")
+            throw UsageProviderError.nothingMetered(L10n.t("Command Code has nothing metered on this account yet"))
         }
 
         var windows: [LimitWindow] = [
             LimitWindow(
                 id: "monthly",
-                label: "Monthly limit",
+                label: L10n.t("Monthly limit"),
                 usedFraction: used / cap,
                 resetsAt: periodEnd
             )
         ]
 
-        if let five = window(limits["fiveHour"], id: "fiveHour", label: "5h limit") {
+        if let five = window(limits["fiveHour"], id: "fiveHour", label: L10n.t("5h limit")) {
             windows.append(five)
         }
-        if let weekly = window(limits["weekly"], id: "weekly", label: "Weekly limit") {
+        if let weekly = window(limits["weekly"], id: "weekly", label: L10n.t("Weekly limit")) {
             windows.append(weekly)
         }
         return windows
