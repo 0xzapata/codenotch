@@ -50,13 +50,22 @@ enum NotchLayout {
 
     // A provider cell
     static let ringDiameter  = Design.px(117)   // 44pt, the design spec's anchor
-    static let trackStroke   = Design.px(15.5)
+    // Wide enough for two 8px arcs and a 1px gap between them: the session
+    // arc on the outer half and the weekly arc on the inner half of one
+    // track, so the pair read as equal bands rather than a ring and a hairline.
+    static let trackStroke   = Design.px(17)
     static let progressStroke = Design.px(8)
+    static let arcGap        = Design.px(1)
     static let glyphSize     = Design.px(46)
     static let ringLabelGap  = Design.px(26.9)
 
+    // The second window's arc — weekly inside session — the same weight as
+    // the main arc, on the inner half of the same track.
+    static let secondaryStroke   = progressStroke
+    static var secondaryDiameter: CGFloat { ringDiameter - 2 * (progressStroke * 1.5 + arcGap) }
+
     // The activity indicator. Not in the design frame — sized to sit in the gap
-    // between the glyph (46px across) and the inside edge of the track (86px),
+    // between the glyph (46px across) and the inside edge of the track (83px),
     // so it never crowds either.
     static let activityDiameter = Design.px(72)
     static let activityStroke   = Design.px(5.5)

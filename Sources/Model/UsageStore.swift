@@ -408,7 +408,11 @@ final class UsageStore: ObservableObject {
     /// A failed fetch never invents a number: it either re-shows the last good
     /// one marked stale, or shows the cell with no reading at all.
     private func degraded(provider: UsageProvider, error: Error) -> ProviderSnapshot? {
-        if !provider.isVisibleWhenAbsent {
+        // Hidden-when-absent providers vanish only when they are absent — the
+        // Ollama daemon stopped, no router URL typed. One that *is* set up and
+        // failed keeps its cell, so a wrong password reads as "needs auth"
+        // rather than as nothing at all.
+        if !provider.isVisibleWhenAbsent && provider.account() == nil {
             lastGood[provider.id] = nil
             archive.save(lastGood)
             return nil

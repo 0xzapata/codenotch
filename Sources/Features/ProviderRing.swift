@@ -11,6 +11,9 @@ struct ProviderRing: View {
     /// Nil when the provider reports what is left but never says out of what —
     /// there is no arc to draw, and inventing one would be a lie in a shape.
     let usedFraction: Double?
+    /// The next window (weekly, say), as a thinner blue arc just inside the
+    /// main one. Nil draws nothing there.
+    var secondaryFraction: Double? = nil
     let glyph: ProviderGlyph
     var isStale: Bool = false
     /// Blocked right now. Shown as spent whatever the arc says, because that is
@@ -24,12 +27,19 @@ struct ProviderRing: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.codenotchReduceTransparency) private var reduceTransparency
     @Environment(\.codenotchAccentColor) private var accentColor
+    @AppStorage(Preferences.ringShowsRemainingKey) private var showsRemaining = true
     @State private var spin: Double = 0
 
+    // The colour is about how close the limit is, whichever way the arc runs.
     private var band: UsageBand {
         isBlocked ? .exhausted : UsageBand.band(for: usedFraction ?? 0)
     }
-    private var sweep: CGFloat { CGFloat(min(max(usedFraction ?? 0, 0), 1)) }
+    private var sweep: CGFloat { sweep(for: usedFraction) }
+    private var secondarySweep: CGFloat { sweep(for: secondaryFraction) }
+    private func sweep(for fraction: Double?) -> CGFloat {
+        let used = CGFloat(min(max(fraction ?? 0, 0), 1))
+        return showsRemaining ? 1 - used : used
+    }
 
     var body: some View {
         ZStack {
@@ -40,9 +50,12 @@ struct ProviderRing: View {
                 Circle()
                     .strokeBorder(Palette.ringTrack, lineWidth: NotchLayout.trackStroke)
 
+                // Alone, the arc runs down the middle of the track; paired
+                // with a weekly, it moves to the outer half so the two sit
+                // side by side at the same weight.
                 if usedFraction != nil {
                     Circle()
-                        .inset(by: NotchLayout.trackStroke / 2)
+                        .inset(by: secondaryFraction == nil ? NotchLayout.trackStroke / 2 : NotchLayout.progressStroke / 2)
                         .trim(from: 0, to: sweep)
                         .stroke(
                             band.color(accent: accentColor),
@@ -57,6 +70,21 @@ struct ProviderRing: View {
                         // that sweeps reads as a measurement being taken.
                         .animation(NotchMotion.reading, value: sweep)
                         .animation(NotchMotion.reading, value: band)
+                }
+
+                // Same weight as the session arc, on the inner half of the
+                // track. ponytail: one fixed blue, whatever the weekly band;
+                // colour it by band too if a blue arc at 95% ever reads as calm.
+                if secondaryFraction != nil {
+                    Circle()
+                        .inset(by: (NotchLayout.ringDiameter - NotchLayout.secondaryDiameter) / 2)
+                        .trim(from: 0, to: secondarySweep)
+                        .stroke(
+                            Palette.secondary,
+                            style: StrokeStyle(lineWidth: NotchLayout.secondaryStroke, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90 + spin))
+                        .animation(NotchMotion.reading, value: secondarySweep)
                 }
 
                 ProviderGlyphView(glyph: glyph)
@@ -164,15 +192,18 @@ struct ProviderCell: View {
     var activity: ActivitySummary?
     var isRefreshing: Bool = false
 
+    @AppStorage(Preferences.ringShowsRemainingKey) private var showsRemaining = true
+
     /// A dash, not "0%": nothing read is not the same as nothing used.
     private var percentText: String {
-        snapshot.hasReading ? snapshot.headlineText : "—"
+        snapshot.hasReading ? snapshot.headlineText(remaining: showsRemaining) : "—"
     }
 
     var body: some View {
         VStack(spacing: NotchLayout.ringLabelGap) {
             ProviderRing(
                 usedFraction: snapshot.hasReading ? snapshot.ringFraction : nil,
+                secondaryFraction: snapshot.hasReading ? snapshot.secondaryFraction : nil,
                 glyph: snapshot.glyph,
                 isStale: snapshot.status.isStale || !snapshot.hasReading,
                 isBlocked: snapshot.block != nil,

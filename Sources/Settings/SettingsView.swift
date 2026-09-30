@@ -478,6 +478,13 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Toggle("Ring shows what is left", isOn: $preferences.ringShowsRemaining)
+                Text("The ring and its number count down the allowance that remains. "
+                     + "Off, they count up what has been used.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Toggle("Show usage pace", isOn: $preferences.showUsagePace)
                 Text("Compares each timed allowance with the time left until reset, "
                      + "showing quota in deficit or held in reserve.")
@@ -1264,6 +1271,11 @@ private struct AccountRow: View {
             if provider.id == "ollama" {
                 ollamaKeyEntry
             }
+            // A router is reached wherever the user runs it, so the URL is
+            // typed here too; the token goes to the keychain like Ollama's key.
+            if let kind = [RouterKind.nineRouter, .omniRoute].first(where: { $0.id == provider.id }) {
+                RouterEntry(kind: kind, signIn: signIn)
+            }
         }
     }
 
@@ -1427,4 +1439,129 @@ private struct AccountRow: View {
         )
     }
 
+}
+
+/// Base URL and token for a self-hosted router. The URL is saved as typed; the
+/// token only on Save, so a half-typed secret never lands in the keychain.
+private struct RouterEntry: View {
+    let kind: RouterKind
+    let signIn: (String) -> Bool
+
+    @AppStorage private var baseURL: String
+    @AppStorage private var selected: String
+    @AppStorage private var known: String
+    @AppStorage private var windowsJSON: Data
+    @AppStorage private var accountCount: Int
+    @State private var token = ""
+    @State private var saved = false
+
+    init(kind: RouterKind, signIn: @escaping (String) -> Bool) {
+        self.kind = kind
+        self.signIn = signIn
+        _baseURL = AppStorage(wrappedValue: "", RouterCredentials.baseURLKey(kind))
+        _selected = AppStorage(wrappedValue: "", RouterCredentials.providerKey(kind))
+        _known = AppStorage(wrappedValue: "", RouterCredentials.knownProvidersKey(kind))
+        _windowsJSON = AppStorage(wrappedValue: Data(), RouterCredentials.windowsKey(kind))
+        _accountCount = AppStorage(wrappedValue: 0, RouterCredentials.accountCountKey(kind))
+    }
+
+    /// Providers the router listed last time, plus the chosen one even if it
+    /// has since gone, so the picker never shows a selection it cannot name.
+    private var choices: [String] {
+        var list = known.split(separator: ",").map(String.init)
+        if !selected.isEmpty, !list.contains(selected) { list.append(selected) }
+        return list
+    }
+
+    private var tokenHint: String {
+        kind.id == "9router"
+            ? "The dashboard password, a CLI token, or empty to read ~/.9router on this Mac."
+            : "Access token or manage-scoped API key."
+    }
+
+    /// The provider the ring stands for: the chosen one, else the first listed.
+    private var shownProvider: String {
+        selected.isEmpty ? (choices.first ?? "Provider") : selected
+    }
+
+    /// What the provider summed on its last fetch, or nothing before one.
+    private var windows: [LimitWindow] {
+        (try? JSONDecoder().decode([LimitWindow].self, from: windowsJSON)) ?? []
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // The sum the ring shows, spelled out per window so the user can
+            // check it against the router's own dashboard: every account of
+            // the chosen provider added together, reset only when they agree.
+            if !windows.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(shownProvider) · \(accountCount == 1 ? "1 account" : "\(accountCount) accounts summed")")
+                        .foregroundStyle(.secondary)
+                    ForEach(windows) { window in
+                        HStack(spacing: 6) {
+                            Text(window.label)
+                            Text(window.summary).foregroundStyle(.secondary)
+                            if let reset = window.resetsAt {
+                                Text(ResetCopy.text(for: reset)).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+                .textSelection(.enabled)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Router URL")
+                TextField("Router URL", text: $baseURL, prompt: Text(kind.defaultBaseURL))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .autocorrectionDisabled()
+                    .help("Where \(kind.displayName) listens. Empty means \(kind.defaultBaseURL).")
+                    .onSubmit { _ = signIn(kind.id) }
+            }
+            // The ring shows one upstream provider, all of its accounts summed.
+            // The provider re-reads this on every fetch, so no restart.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Show provider")
+                Picker("Show provider", selection: $selected) {
+                    Text("First listed").tag("")
+                    ForEach(choices, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: 160, alignment: .leading)
+                .onChange(of: selected) { _ = signIn(kind.id) }
+                Text("Limits are summed across all accounts of that provider.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Token")
+                HStack(spacing: 8) {
+                    SecureField("Token", text: $token)
+                        .labelsHidden()
+                        .textContentType(.password)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                    Button("Save") {
+                        guard !token.isEmpty else { return }
+                        RouterCredentials.store(token, for: kind)
+                        token = ""
+                        saved = true
+                        _ = signIn(kind.id)
+                    }
+                    .controlSize(.small)
+                    .disabled(token.isEmpty)
+                    if saved {
+                        Text("Saved.").foregroundStyle(.green).controlSize(.small)
+                    }
+                }
+                Text(tokenHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }

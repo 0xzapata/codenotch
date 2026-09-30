@@ -267,12 +267,14 @@ private struct LimitWindowRow: View {
     let resetTimeFormat: ResetTimeFormat
     let showsUsagePace: Bool
     @Environment(\.codenotchAccentColor) private var accentColor
+    @AppStorage(Preferences.ringShowsRemainingKey) private var showsRemaining = true
 
     private var band: UsageBand { UsageBand.band(for: window.usedFraction ?? 0) }
     private var trackWidth: CGFloat { NotchLayout.cardWidth - 2 * NotchLayout.cardPadding - inset }
+    /// Fills the same way the ring sweeps, so the card and the notch agree.
     private var fillWidth: CGFloat {
-        let fraction = CGFloat(min(max(window.usedFraction ?? 0, 0), 1))
-        return max(NotchLayout.barHeight, trackWidth * fraction)
+        let used = CGFloat(min(max(window.usedFraction ?? 0, 0), 1))
+        return max(NotchLayout.barHeight, trackWidth * (showsRemaining ? 1 - used : used))
     }
 
     private var paceText: Text {

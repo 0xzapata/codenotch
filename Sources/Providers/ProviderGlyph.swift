@@ -24,6 +24,8 @@ enum ProviderGlyph: String, Codable, Equatable {
     case copilot
     case ollama
     case ollamaLocal = "ollama-local"
+    case nineRouter = "9router"
+    case omniRoute = "omniroute"
 
     /// If an asset with this name is in the bundle it wins over the traced
     /// outline — drop a PDF/SVG export from Figma in and it is picked up.
@@ -55,6 +57,7 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .ollama: return 0.95
         case .third:  return 1.0
         case .ollama, .ollamaLocal: return 0.98
+        case .nineRouter, .omniRoute: return 0.9
         }
     }
 
@@ -72,6 +75,8 @@ enum ProviderGlyph: String, Codable, Equatable {
         case .commandcode: return GlyphOutline.commandcode
         case .copilot: return GlyphOutline.copilot
         case .ollama, .ollamaLocal: return GlyphOutline.ollama
+        case .nineRouter: return GlyphOutline.nineRouter
+        case .omniRoute: return GlyphOutline.omniRoute
         }
     }
 }

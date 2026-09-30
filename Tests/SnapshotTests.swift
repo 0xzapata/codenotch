@@ -51,6 +51,16 @@ final class SnapshotTests: XCTestCase {
 
     /// Token counts are seven digits wide and the ring is 44 pt; requests and
     /// credits are small enough to stay verbatim.
+    /// The inner arc is the next window with a denominator, never the headline.
+    func testSecondaryIsTheNextMeteredWindow() {
+        let s = snapshot([window("session", 0.16), window("weekly", 0.35)])
+        XCTAssertEqual(s.secondaryFraction ?? -1, 0.35, accuracy: 0.0001)
+        XCTAssertNil(snapshot([window("session", 0.16)]).secondaryFraction)
+        let counts = ProviderSnapshot(id: "p", displayName: "P", glyph: .claude, fidelity: .official, status: .ok,
+                                      windows: [window("session", 0.16), LimitWindow(id: "n", label: "n", remaining: 3)])
+        XCTAssertNil(counts.secondaryFraction)
+    }
+
     func testLargeCountsAreCompacted() {
         XCTAssertEqual(LimitWindow.compact(9_999), "9999")
         XCTAssertEqual(LimitWindow.compact(651_061), "651k")

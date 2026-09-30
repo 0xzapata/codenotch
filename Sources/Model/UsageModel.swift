@@ -34,38 +34,45 @@ enum ProviderStatus: Equatable {
 /// a percent and still add up: 0.3% used is 99.7% left. A tenth of nothing
 /// says so rather than pretending to be zero.
 enum Percent {
-    /// The two halves of a used-fraction, as display text.
-    static func halves(for fraction: Double) -> (used: String, left: String) {
-        let value = fraction * 100
-        let fractional = (value > 0 && value < 1) || (value > 99 && value < 100)
+    /// The two halves of a used-fraction, as display text. `accounts` is how
+    /// many whole limits the fraction pools: a router's two accounts read as
+    /// "42% Used · 158% left" of 200%, the sum the user can check account by
+    /// account, not an average squeezed back into 100.
+    static func halves(for fraction: Double, accounts: Int = 1) -> (used: String, left: String) {
+        let whole = Double(100 * accounts)
+        let value = fraction * whole
+        let fractional = (value > 0 && value < 1) || (value > whole - 1 && value < whole)
         guard fractional else {
             // The left half derives from the *rounded* used half, not from the
             // raw value — 9.5% used is "10% Used · 90% left", because that is
             // how the dashboard the user is comparing against does the maths.
             let used = Int(value.rounded())
-            return ("\(used)", "\(max(0, 100 - used))")
+            return ("\(used)", "\(max(0, 100 * accounts - used))")
         }
-        let left = max(0, 100 - value)
+        let left = max(0, whole - value)
         // "<0.1" has no number to subtract from a hundred, so the far half
         // makes the same claim from its own end: ">99.9".
-        return (small(value), left > 99.9 ? ">99.9" : small(left))
+        return (small(value, below: whole),
+                value < 0.1 ? ">" + small(whole - 0.1, below: whole) : small(left, below: whole))
     }
 
     /// One percentage, as display text — the ring's label.
-    static func text(for fraction: Double) -> String {
-        let value = fraction * 100
+    static func text(for fraction: Double, accounts: Int = 1) -> String {
+        let value = fraction * Double(100 * accounts)
         guard value > 0, value < 1 else { return "\(Int(value.rounded()))" }
         return small(value)
     }
 
-    private static func small(_ value: Double) -> String {
+    private static func small(_ value: Double, below whole: Double = 100) -> String {
         if value <= 0 { return "0" }
         let tenths = (value * 10).rounded() / 10
         if tenths < 0.1 { return "<0.1" }
-        if tenths > 99.9 { return ">99.9" }
+        // A tenth short of the whole, rounded up, is not the whole: ">99.9".
+        let full = tenths >= whole
         // Fixed locale: the decimal point is not up to the system settings,
         // any more than "%" is.
-        return String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), tenths)
+        return (full ? ">" : "")
+            + String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), full ? whole - 0.1 : tenths)
     }
 }
 
@@ -90,9 +97,14 @@ struct LimitWindow: Identifiable, Codable, Equatable {
     /// Exact cycle length when known; optional to keep older archives readable.
     let duration: TimeInterval?
 
+    /// How many accounts' limits the window sums, when a router pools them;
+    /// nil for one. `usedFraction` is then a fraction of the whole pool, and
+    /// the text reads out of `accounts × 100%`.
+    let accounts: Int?
+
     init(id: String, group: String? = nil, label: String, usedFraction: Double? = nil,
          remaining: Int? = nil, used: Int? = nil, resetsAt: Date? = nil,
-         duration: TimeInterval? = nil) {
+         duration: TimeInterval? = nil, accounts: Int? = nil) {
         self.id = id
         self.group = group
         self.label = label
@@ -101,6 +113,7 @@ struct LimitWindow: Identifiable, Codable, Equatable {
         self.used = used
         self.resetsAt = resetsAt
         self.duration = duration
+        self.accounts = accounts
     }
 
     /// A count short enough to sit inside a 44 pt ring.
@@ -123,8 +136,9 @@ struct LimitWindow: Identifiable, Codable, Equatable {
             // head, and "12% Used" beside Codex's "87% remaining" reads as two
             // different numbers rather than one seen from either end. That is
             // what made a correct reading look wrong.
-            let halves = Percent.halves(for: usedFraction)
-            return "\(halves.used)% Used · \(halves.left)% left"
+            let accounts = accounts ?? 1
+            let halves = Percent.halves(for: usedFraction, accounts: accounts)
+            return "\(halves.used)% Used · \(halves.left)% left" + (accounts > 1 ? " of \(100 * accounts)%" : "")
         }
         if let remaining {
             return remaining == 1 ? "1 left" : "\(Self.compact(remaining)) left"
@@ -200,9 +214,24 @@ struct ProviderSnapshot: Identifiable, Equatable {
 
     var usedFraction: Double? { headline?.usedFraction }
 
+    /// The next metered window after the headline — Claude's weekly beside its
+    /// session — drawn as a thinner arc inside the main one. Nil when the
+    /// provider meters one window, or none with a denominator.
+    var secondaryFraction: Double? {
+        windows.first { $0.id != headline?.id && $0.usedFraction != nil }?.usedFraction
+    }
+
+    /// What the cell prints under the ring: the spent end by default, or the
+    /// other end of the same figure when the ring counts down. The halves are
+    /// rounded as a pair so "12%" flips to "88%", never "87%".
+    func headlineText(remaining: Bool) -> String {
+        guard remaining, let usedFraction else { return headlineText }
+        return Percent.halves(for: usedFraction, accounts: headline?.accounts ?? 1).left + "%"
+    }
+
     /// What the cell prints under the ring.
     var headlineText: String {
-        if let usedFraction { return Percent.text(for: usedFraction) + "%" }
+        if let usedFraction { return Percent.text(for: usedFraction, accounts: headline?.accounts ?? 1) + "%" }
         if let remaining = headline?.remaining { return LimitWindow.compact(remaining) }
         if let used = headline?.used { return LimitWindow.compact(used) }
         return "—"
@@ -245,6 +274,8 @@ struct ProviderSnapshot: Identifiable, Equatable {
         // one wants a key, the local one wants the daemon running.
         case "ollama":       return "Enter an Ollama API key in Settings, or export OLLAMA_API_KEY"
         case "ollama-local": return "Start Ollama to monitor your local models"
+        case "9router", "omniroute":
+            return "Enter the \(displayName) URL and token in Settings, and make sure it is running"
         default:           return "Sign in to \(displayName) to read your usage"
         }
     }
