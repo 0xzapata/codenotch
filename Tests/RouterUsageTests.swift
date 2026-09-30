@@ -97,9 +97,27 @@ final class RouterUsageTests: XCTestCase {
         XCTAssertEqual(windows[0].id, "claude.session (5h)")
         XCTAssertEqual(windows[0].usedFraction!, 0.21, accuracy: 1e-9)
         XCTAssertEqual(windows[1].usedFraction!, 0.2525, accuracy: 1e-9)
+        // The text is the sum, each account's own percent added: 88 + 70 left.
+        XCTAssertEqual(windows[0].accounts, 2)
+        XCTAssertEqual(windows[0].summary, "42% Used · 158% left of 200%")
+        let snap = ProviderSnapshot(id: "9router", displayName: "9router", glyph: .nineRouter,
+                                    fidelity: .official, status: .ok, windows: windows,
+                                    headlineID: windows[0].id)
+        XCTAssertEqual(snap.headlineText(remaining: true), "158%")
+        XCTAssertEqual(snap.headlineText, "42%")
         // Both accounts agree on the session reset, so it is kept.
         XCTAssertEqual(windows[0].resetsAt, RouterUsage.parseDate("2026-09-09T12:00:00Z"))
         XCTAssertNil(windows[1].resetsAt)
+    }
+
+    /// One account reads as it always did; the pool's edges keep a tenth.
+    func testOneAccountAndPoolEdges() {
+        let one = RouterUsage.aggregate([(list[0], claude(session: 12, weekly: 0, reset: "x"))], provider: "claude")
+        XCTAssertEqual(one[0].summary, "12% Used · 88% left")
+        XCTAssertEqual(Percent.halves(for: 0.0001, accounts: 2).used, "<0.1")
+        XCTAssertEqual(Percent.halves(for: 0.0001, accounts: 2).left, ">199.9")
+        XCTAssertEqual(Percent.halves(for: 0.9999, accounts: 2).used, ">199.9")
+        XCTAssertEqual(Percent.halves(for: 0.998, accounts: 2).left, "0.4")
     }
 
     func testResetIsOmittedWhenAccountsDisagree() {

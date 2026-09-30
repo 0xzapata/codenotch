@@ -58,7 +58,7 @@ struct RouterKind: Equatable {
 /// instead of `quotas`; it is skipped rather than shown as an error.
 ///
 /// `used`/`total` are percentages of one account (`total` is always 100 in
-/// both routers' handlers), so summing them weights every account equally.
+/// both routers' handlers); each account is read as its own 0–100%.
 enum RouterUsage {
     struct Connection: Equatable {
         let id: String
@@ -104,13 +104,14 @@ enum RouterUsage {
     }
 
     /// One window per quota key, summed across every account of one upstream
-    /// provider: two Claude accounts at 12/100 and 40/100 read as 26%. Each
+    /// provider: two Claude accounts at 12% and 40% used read as 52% used,
+    /// 148% left of 200% — each account's real figure added, not averaged. Each
     /// window keeps its reset date only when every account agrees on it — a
     /// summed figure has no single reset otherwise, and showing one account's
     /// would be a guess.
     static func aggregate(_ usages: [(connection: Connection, data: Data)],
                           provider: String) -> [LimitWindow] {
-        struct Sum { var used = 0.0; var total = 0.0; var remaining = 0; var resets: [Date?] = [] }
+        struct Sum { var used = 0.0; var accounts = 0; var remaining = 0; var resets: [Date?] = [] }
         var sums: [String: Sum] = [:]
         for (connection, data) in usages where connection.provider == provider {
             guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -122,9 +123,9 @@ enum RouterUsage {
                 else { continue }
                 var sum = sums[key] ?? Sum()
                 if let total = number(quota["total"]), total > 0, let used = number(quota["used"]) {
-                    sum.used += min(max(used, 0), total); sum.total += total
+                    sum.used += min(max(used, 0), total) / total; sum.accounts += 1
                 } else if let pct = number(quota["remainingPercentage"]) ?? number(quota["percentRemaining"]) {
-                    sum.used += min(max(100 - pct, 0), 100); sum.total += 100
+                    sum.used += min(max(100 - pct, 0), 100) / 100; sum.accounts += 1
                 } else if let remaining = number(quota["remaining"]) {
                     sum.remaining += Int(remaining)
                 } else { continue }
@@ -139,9 +140,12 @@ enum RouterUsage {
             }
             return LimitWindow(
                 id: "\(provider).\(key)", label: key,
-                usedFraction: sum.total > 0 ? sum.used / sum.total : nil,
-                remaining: sum.total > 0 ? nil : sum.remaining,
-                resetsAt: agreed
+                // A fraction of the whole pool, so the ring fills against
+                // every account's limit; `accounts` puts the text back in sums.
+                usedFraction: sum.accounts > 0 ? sum.used / Double(sum.accounts) : nil,
+                remaining: sum.accounts > 0 ? nil : sum.remaining,
+                resetsAt: agreed,
+                accounts: sum.accounts > 0 ? sum.accounts : nil
             )
         }
     }
