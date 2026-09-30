@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 **A macOS app that pins a small black notch to a screen edge, showing how much
-of each coding assistant's usage limit you have burned — and whether it is
+of each coding assistant's usage limit you have left (or, if you prefer, burned) — and whether it is
 still working, done, or waiting on you.**
 
 ![Collapsed notch with hover tooltip](docs/design/frame-124-hover-tooltip.png)
@@ -105,6 +105,8 @@ wire-level details.
 | **Amp** | official subscription percentages; derived free-allowance percentage | The Amp CLI login in `~/.local/share/amp/secrets.json`, against Amp's `userDisplayBalanceInfo` endpoint. Shows Agent and Orb usage, or the Free allowance and replenishment rate. See [Amp details](docs/providers/amp.md). |
 | **Apify** | official | The `apify login` session already on this Mac (`~/.apify/auth.json`, or the token the CLI keeps in the keychain), or a token pasted in Settings or exported as `APIFY_TOKEN`, against the `/v2/users/me/limits` endpoint the Console's Billing page draws from. Shows this cycle's platform spend against the account's monthly usage limit. See [Apify details](docs/providers/apify.md). |
 | **Kilo** | official | The Kilo CLI's own sign-in (`~/.local/share/kilo/auth.json`), against the same coding-plan quota and balance endpoints the CLI asks. Shows the plan's quota windows and the credit balance. |
+| **9router** | official | One upstream provider you pick in Settings, every account of it connected in a self-hosted [9router](https://github.com/decolua/9router) summed into one ring, read through its dashboard API at the URL you enter (the allow-listed `/api/providers/client` listing, one call per account for quotas, polled once a minute like the dashboard). The token is borrowed from `~/.9router` when the router runs on this Mac; for a remote router, paste its dashboard password or a CLI token. |
+| **OmniRoute** | official | The same, for a self-hosted [OmniRoute](https://github.com/diegosouzapw/OmniRoute), read through its management API at the URL you enter in Settings with an `oma_live_…` access token or a `manage`-scoped API key. |
 
 Most providers borrow a credential or session from a tool already on your Mac.
 DeepSeek is the explicit browser-login exception: it never reads a browser's

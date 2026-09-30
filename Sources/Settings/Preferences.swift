@@ -7,6 +7,10 @@ import os
 @MainActor
 final class Preferences: ObservableObject {
     static let showUsagePaceKey = "showUsagePace"
+    /// The ring and its label count down what is left rather than up what is
+    /// spent. On by default: "88%" under a ring that is mostly full answers
+    /// "how much do I have" without a subtraction.
+    static let ringShowsRemainingKey = "ringShowsRemaining"
 
     /// Provider IDs that currently have a ring. Stored as the ones that are
     /// on, so a provider added later stays off until someone switches it on —
@@ -291,6 +295,10 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(weeklyRing.rawValue, forKey: Keys.weeklyRing) }
     }
 
+
+    @Published var ringShowsRemaining: Bool {
+        didSet { defaults.set(ringShowsRemaining, forKey: Self.ringShowsRemainingKey) }
+    }
 
     /// The colour used for positive usage and active-work indicators.
     @Published var accentColor: AccentColorChoice {
@@ -867,6 +875,7 @@ final class Preferences: ObservableObject {
         } else {
             self.deepSeekPricingSchedule = .current
         }
+        self.ringShowsRemaining = defaults.object(forKey: Self.ringShowsRemainingKey) as? Bool ?? true
         // Absent means never chosen. Main display only, because that is what a
         // single-panel setup always did — all-displays on a fresh install
         // would put notches where none were expected.

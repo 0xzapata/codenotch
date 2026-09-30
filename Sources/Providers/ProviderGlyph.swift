@@ -41,6 +41,8 @@ enum ProviderGlyph: String, Codable, Equatable {
     /// from the local Qwen model brand in `.qwen` — a ring wearing this one is
     /// the platform account, not a model.
     case qianwenAI = "qianwenai"
+    case nineRouter = "9router"
+    case omniRoute = "omniroute"
 
     /// If an asset with this name is in the bundle it wins over the traced
     /// outline — drop a PDF/SVG export from Figma in and it is picked up.
@@ -87,6 +89,7 @@ enum ProviderGlyph: String, Codable, Equatable {
         // the same scale brings this ink to the same extent.
         case .qianwenAI: return 0.97
         case .devin, .qwen, .gemma, .meta, .deepseek, .mistral: return 1.0
+        case .nineRouter, .omniRoute: return 0.9
         }
     }
 
@@ -113,6 +116,8 @@ enum ProviderGlyph: String, Codable, Equatable {
         // A fallback only: glyph-minimax in the asset catalogue is drawn instead.
         case .minimax: return GlyphOutline.minimax
         case .ollama, .ollamaLocal: return GlyphOutline.ollama
+        case .nineRouter: return GlyphOutline.nineRouter
+        case .omniRoute: return GlyphOutline.omniRoute
         }
     }
 }
